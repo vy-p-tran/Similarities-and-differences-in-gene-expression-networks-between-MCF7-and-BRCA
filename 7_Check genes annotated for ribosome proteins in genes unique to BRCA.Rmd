@@ -1,0 +1,106 @@
+---
+title: "Check ribosome cluster in BRCA"
+author: "Vy Tran"
+date: "October 30, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load library include=FALSE}
+library(dplyr)
+library(tidyverse)
+```
+Genes unique to BRCA were inputed into EnrichR to identify genes that are enriched fpr Cytoplasmic Ribosomal Proteins, and the file was convert into csv:
+```{r}
+write.csv(Genes.unique.to.BRCA_ENRICHR_WikiPathways_2019_Human_table, file = "D:/vytran/OneDrive - JHSPH/Year 3/Evaluate-the-validity-of-the-breast-cancer-cell-line-MCF7-as-a-model-for-breast-cancer-research/Ribosome clustering issue/EnrichR of genes unique to BRCA.csv")
+```
+
+```{r}
+BRCA_dat = as.data.frame(WGCNA_matrix_BRCA)
+```
+
+```{r}
+#Convert the string from EnrichR excel to a character vector:
+BRCA_genes_enriched_ribosomes = as.character(expression(RPL4,RPL3,RPL32,RPL10,RPLP1,RPL12,RPLP0,RPL10A,RPL8,RPL9,RPL6,RPL7,RPS15,RPL7A,RPS17,RPS15A,RPL18A,RPS18,RPS6KA1,RPL36,RPL14,RPS3,RPL13,RPS2,RPS11,RPL18,RPS27A,RPL39,RPS10,RPS13,RPS12,RPL41,RPS7,RPS8,RPL23,RPL13A,RPS3A,RPSA,RPL23A,RPS26,RPS25,RPS28,RPS27,RPL27A,RPL24,RPL26,FAU,RPL29))
+
+length(BRCA_genes_enriched_ribosomes)
+
+list1 = colnames(BRCA_dat)
+list2 = sapply(strsplit(list1, split = "\\|"), `[`, 1) #The symbol | is a special character (regular expression, so you need the double escape \\)
+colnames(BRCA_dat) = list2
+
+#Select columns that contains genes from the ribosome_enriched gene list:
+BRCA_ribosome = BRCA_dat %>% select(one_of(as.vector(BRCA_genes_enriched_ribosomes)))
+
+ncol(BRCA_ribosome)
+
+```
+Plot the distribution gene across samples in BRCA:
+
+```{r}
+pdf(file = "D:/vytran/OneDrive - JHSPH/Year 3/Evaluate-the-validity-of-the-breast-cancer-cell-line-MCF7-as-a-model-for-breast-cancer-research/Ribosome clustering issue/Expression of genes enriched for ribosomes in genes unique to BRCA.pdf",width = 12, height = 9)
+boxplot(BRCA_ribosome, ylab = "Count", las = 3, cex = 0.2,  col = "lightblue") #The black line shows the median. Outliers (if there is any) are shown.
+dev.off()
+```
+#############################################################
+GET GENES ANNOTATED FOR RIBOSOMES IN BRCA: 
+```{r}
+#Get the list of all 10,000 genes in the BRCA data set:
+BRCA_dat = as.data.frame(WGCNA_matrix_BRCA)
+BRCA_genes = colnames(BRCA_dat)
+BRCA_genes_1 = sapply(strsplit(BRCA_genes, split = "\\|"), `[`, 1)
+colnames(BRCA_dat) = BRCA_genes_1
+
+#Export the gene list to import into EnrichR:
+write.csv(BRCA_genes_1, file = "D:/vytran/OneDrive - JHSPH/Year 3/Evaluate-the-validity-of-the-breast-cancer-cell-line-MCF7-as-a-model-for-breast-cancer-research/Ribosome clustering issue/10000 genes in BRCA data set.csv")
+
+#Load the results from EnrichR to R and convert the file to csv:
+write.csv(EntireBRCA.annotation_WikiPathways_2019_Human_table, file = "D:/vytran/OneDrive - JHSPH/Year 3/Evaluate-the-validity-of-the-breast-cancer-cell-line-MCF7-as-a-model-for-breast-cancer-research/Ribosome clustering issue/Entire BRCA EnrichR.csv")
+```
+
+```{r}
+#Convert the ribosomal gene list into a character vector:
+entire_BRCA_genes_enriched_ribosomes = as.character(expression(RPL4,RPL5,RPL30,RPL3,RPL32,RPL31,RPL34,RPLP1,RPLP0,RPL10A,RPL8,RPL9,RPL6,RPL7,RPS4X,RPS15,RPS6KA3,RPL7A,RPS14,RPS17,RPS16,RPL18A,RPS19,RPS18,RPS6KA2,RPS6KA1,RPL36,RPL35,RPLP2,RPL38,RPL37,RPS11,RPL39,RPS10,RPS13,RPS12,RPS9,RPS7,RPS8,RPL23,RPS5,RPL22,RPS6,RPL13A,RPS3A,RPSA,RPL37A,RPL24,RPL27,RPL26,RPL29,RPL28,UBA52,RPL10,RPL12,RPL11,MRPL19,RPS15A,RPL14,RPS3,RPL13,RPL15,RPS2,RPL18,RPS27A,RPL17,RPL19,RPL41,RPL35A,RPL23A,RPS26,RPS25,RPS28,RPS27,RPS6KB1,RPS29,RPL27A,RPS6KB2,RPS20,FAU,RPS21,RPS24,RPS23))
+
+length(entire_BRCA_genes_enriched_ribosomes)
+                                                    
+#Select columns that contains genes from the BRCA ribosome_enriched gene list:
+entire_BRCA_ribosome = BRCA_dat %>% select(one_of(entire_BRCA_genes_enriched_ribosomes))
+dim(entire_BRCA_ribosome)
+
+```
+Plot the distribution gene across samples in entire BRCA:
+```{r}
+pdf(file = "D:/vytran/OneDrive - JHSPH/Year 3/Evaluate-the-validity-of-the-breast-cancer-cell-line-MCF7-as-a-model-for-breast-cancer-research/Ribosome clustering issue/Expression of genes enriched for ribosomes entire BRCA.pdf",width = 12, height = 9)
+boxplot(entire_BRCA_ribosome, ylab = "Count", las = 3, cex = 0.2, cex.axis = 0.75, col = "lightblue") #The black line shows the median. Outliers (if there is any) are shown.
+dev.off()
+```
+
+#############################################################
+GET EXPRRESSION OF THOSE GENES IN ARCHS4 AND GSE: 
+```{r}
+#Select columns in ARCHS4 that contains genes from the BRCA ribosome_enriched gene list:
+ARCHS4_ribosome = ARCHS4_dat %>% select(one_of(entire_BRCA_genes_enriched_ribosomes))
+dim(ARCHS4_ribosome)
+```
+
+```{r}
+pdf(file = "D:/vytran/OneDrive - JHSPH/Year 3/Evaluate-the-validity-of-the-breast-cancer-cell-line-MCF7-as-a-model-for-breast-cancer-research/Ribosome clustering issue/Expression of genes enriched for ribosomes ARCHS4.pdf",width = 12, height = 9)
+boxplot(ARCHS4_ribosome, ylab = "Count", las = 3, cex = 0.2, cex.axis = 0.75, col = "lightblue") #The black line shows the median. Outliers (if there is any) are shown.
+dev.off()
+```
+```{r}
+#Select columns in GSE50705 that contains genes from the BRCA ribosome_enriched gene list:
+GSE_dat = as.data.frame(MCF7_estrogen)
+GSE_ribosome = GSE_dat %>% dplyr::select(matches("RPL4|RPL5|RPL30|RPL3|RPL32|RPL31|RPL34|RPLP1|RPLP0|RPL10A|RPL8|RPL9|RPL6|RPL7|RPS4X|RPS15|RPS6KA3|RPL7A|RPS14|RPS17|RPS16|RPL18A|RPS19|RPS18|RPS6KA2|RPS6KA1|RPL36|RPL35|RPLP2|RPL38|RPL37|RPS11|RPL39|RPS10|RPS13|RPS12|RPS9|RPS7|RPS8|RPL23|RPS5|RPL22|RPS6|RPL13A|RPS3A|RPSA|RPL37A|RPL24|RPL27|RPL26|RPL29|RPL28|UBA52|RPL10|RPL12|RPL11|MRPL19|RPS15A|RPL14|RPS3|RPL13|RPL15|RPS2|RPL18|RPS27A|RPL17|RPL19|RPL41|RPL35A|RPL23A|RPS26|RPS25|RPS28|RPS27|RPS6KB1|RPS29|RPL27A|RPS6KB2|RPS20|FAU|RPS21|RPS24|RPS23"))
+dim(GSE_ribosome)
+```
+
+```{r}
+pdf(file = "D:/vytran/OneDrive - JHSPH/Year 3/Evaluate-the-validity-of-the-breast-cancer-cell-line-MCF7-as-a-model-for-breast-cancer-research/Ribosome clustering issue/Expression of genes enriched for ribosomes GSE.pdf",width = 12, height = 9)
+boxplot(GSE_ribosome, ylab = "Count", las = 3, cex = 0.2, cex.axis = 0.75, col = "lightblue") #The black line shows the median. Outliers (if there is any) are shown.
+dev.off()
+```

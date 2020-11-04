@@ -1,0 +1,99 @@
+---
+title: "Processing the data for Rank rank hypermetric test"
+author: "Vy Tran"
+date: "September 11, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r library, include = FALSE}
+library(BiocManager)
+BiocManager::install("RRHO")
+library(RRHO)
+library(dplyr)
+
+```
+
+How many genes are overlapping between entire BRCA and GSE50705?
+```{r}
+MCF7 = Scaled_connectivity_for_GEO
+BRCA = Scaled_connectivity_for_entire_BRCA_with_rank
+colnames(MCF7) = c("Probe", "Symbol", "Scaled.connectivity.MCF7", "Rank MCF7")
+colnames(BRCA) = c("Symbol", "Entrez", "Scaled.connectivity.BRCA", "Rank BRCA")
+
+```
+
+```{r}
+MCF7 = MCF7[, c(2,3)]
+
+#Remove genes that are duplicated and select the genes with highest scaled connectivity for each duplicated genes:
+MCF7_filtered = MCF7 %>% group_by(Symbol) %>% filter(Scaled.connectivity.MCF7 == max(Scaled.connectivity.MCF7))
+#Add rank of scaled connectivity:
+MCF7_filtered = MCF7_filtered[order(-MCF7_filtered$Scaled.connectivity.MCF7),]
+MCF7_filtered$Rank.MCF7 = rank(-MCF7_filtered$Scaled.connectivity.MCF7)
+
+#Check and remove duplication in BRCA scaled connectivity:
+BRCA = BRCA[, c(1,3)]
+BRCA_filtered = BRCA %>% group_by(Symbol) %>% filter(Scaled.connectivity.BRCA == max(Scaled.connectivity.BRCA))
+
+#Add rank of scaled connectivity:
+BRCA_filtered = BRCA_filtered[order(-BRCA_filtered$Scaled.connectivity.BRCA),]
+BRCA_filtered$Rank.BRCA = rank(-BRCA_filtered$Scaled.connectivity.BRCA)
+
+rank_rank = merge(MCF7_filtered, BRCA_filtered)
+```
+
+Export the result
+```{r}
+write.csv(rank_rank, file = "GSE and BRCA scaled connectivity for hypermetric test_Sep_24.csv")
+```
+Try RRHO using the R package "RRHO". The workflow include 3 steps:
+* Compute the marginal signifcance of the gene overlap for all i and j first elements of the two lists.
+* Correct the marginal signifcance levels for the multiple is and js.
+* Report findings using the exported signicance matrices and accom-
+panying Venn diagrams.
+```{r}
+gene.list.MCF7 = rank_rank[, c(1,3)]
+gene.list.BRCA = rank_rank[, c(1,5)]
+#Compute overlap and significance:
+RRHO = RRHO(gene.list.MCF7, gene.list.BRCA, BY = TRUE, alternative = "enrichment")
+#Examine Nominal (-log) pvalues
+lattice::levelplot(RRHO$hypermat)
+
+# FWER corrected pvalues using 50 random permutations:
+pval.testing <- pvalRRHO(RRHO, 50)
+pval.testing$pval
+
+```
+
+```{r}
+# The sampling distribution of the minimum
+# of the (-log) nominal p-values:
+xs<- seq(0, 10, length=100)
+plot(Vectorize(pval.testing$FUN.ecdf)(xs)~xs, xlab='-log(pvalue)', ylab='ECDF', type='S')
+```
+
+```{r}
+# Examine B-Y corrected pvalues.
+lattice::levelplot(RRHO$hypermat.by)
+
+```
+Plot the hyper genometric overlap figures before and after correction:
+```{r}
+jpeg(file= "GEO and BRCA rank rank hypermetric overlap.jpeg", width = 3000, height = 3000, res = 300) 
+
+par(mfrow=c(1,2), mar=c(5.1, 7, 4.1, 2.1))
+
+plot.new(ttice::levelplot(RRHO$hypermat)
+title(main ="a", adj=0, line=2, font=2, cex.main = 2)
+
+lattice::levelplot(RRHO$hypermat.by)
+title(main ="b", adj=0, line=2, font=2, cex.main = 2)
+
+dev.off()
+```
+
+```

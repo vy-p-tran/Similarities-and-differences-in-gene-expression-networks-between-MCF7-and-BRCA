@@ -1,0 +1,117 @@
+---
+title: "Enrichments using STRINGdb"
+author: "Vy Tran"
+date: "September 26, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r library, include = FALSE}
+#library(BiocManager)
+#BiocManager::install("STRINGdb")
+library(STRINGdb)
+library(enrichR)
+```
+We would create separate files of gene symbols for each color using Python and feed the files in an R loop for STRINGdb annotation.
+
+```{r}
+#Set annotation background,using all TCGA gene list:
+#background_TCGA = PubMed$genename
+
+#Set background:
+#string_db$set_background(background_TCGA)
+
+```
+Preparing the files for STRINGdb loop
+```{r}
+#Prepare module membership file for BRCA
+BRCAmodules = `10012020_BRCA.entire.set_geneMM`[, c(2,3)]
+colnames(BRCAmodules) = c("gene", "colours")
+write.table(BRCAmodules, file = "BRCAmodules.txt", sep = "\t", row.names = FALSE, col.names = TRUE)
+write.csv(BRCAmodules, file = "BRCAnewmodules.csv")
+
+#Prepare module membership file for GSE50705
+GEOmodules = geneInfoGEO_1[,c(1,2)]
+colnames(GEOmodules) = c("gene", "colours")
+write.csv(GEOmodules, file = "GEOnewmodules.csv")
+
+#Prepare module membership file for ARCHS4
+ARCHS4modules = geneInfoARCHS4_1[,c(1,2)]
+colnames(ARCHS4modules) = c("gene", "colours")
+write.csv(ARCHS4modules, file = "D:/vytran/OneDrive - JHSPH/Year 3/Evaluate-the-validity-of-the-breast-cancer-cell-line-MCF7-as-a-model-for-breast-cancer-research/ARCHS4 results/ARCHS4newmodules.csv")
+```
+Next, these files will be imput into Python to extract gene lists for each color and are then input into the following R loop for annotation:
+```{r}
+#Create a "Colors" vector for the R loop:
+Colors = unique(GEOnewmodules$colours)
+
+#Get gene symbols from BRCA for enrichment backgound:
+#BRCA = BRCA.rnaseqv2__illuminahiseq_rnaseqv2__unc_edu__Level_3__RSEM_genes_normalized__data.data[-c(1,2),]
+#rm(BRCA.rnaseqv2__illuminahiseq_rnaseqv2__unc_edu__Level_3__RSEM_genes_normalized__data.data)
+#background = BRCA[,1]
+#background[1:30]
+#write.csv(background, file = "BRCA annotation background.csv")
+
+#In Excel, I separated gene symbols and Entrez IDs into two columns, then import the data back into R:
+#background = read.csv(file = "D:/vytran/OneDrive - JHSPH/Year 3/Evaluate-the-validity-of-the-breast-cancer-cell-line-MCF7-as-a-model-for-breast-cancer-research/STRING ANNOTATIONS/BRCA background for annotation.csv")
+#background = background$genesymbol
+
+string_db <- STRINGdb$new( version="10", species=9606, score_threshold=200, input_directory="")
+```
+
+```{r}
+for (color in Colors){
+  print(paste(color,":"))
+  print("\n")
+  Genes <- read.delim(paste0("D:/vytran/OneDrive - JHSPH/Year 3/Evaluate-the-validity-of-the-breast-cancer-cell-line-MCF7-as-a-model-for-breast-cancer-research/STRING ANNOTATIONS/GEOnewmodules[",color,"].txt", collapse = ""), header=FALSE, stringsAsFactors=FALSE) #Reading the file works better if the full file path is supplied
+  colnames(Genes)<-c("ID1")
+  mygenes <- string_db$map(my_data_frame = Genes, my_data_frame_id_col_names = "ID1", removeUnmappedRows = TRUE )
+  annotation = string_db$get_enrichment(mygenes$STRING_id)
+  write.csv(annotation, file = paste0("D:/vytran/OneDrive - JHSPH/Year 3/Evaluate-the-validity-of-the-breast-cancer-cell-line-MCF7-as-a-model-for-breast-cancer-research/STRING ANNOTATIONS/GEOannotation", sep ="_", color, ".csv"))
+  #print(string_db$get_enrichment(mygenes$STRING_id))
+  #colorEnrichResult<- enrichr(color, "HomoloGene")
+  #print(colorEnrichResult) 
+}
+
+```
+Perform annotation for BRCA
+```{r}
+#Create a "Colors" vector for the R loop:
+Colors = unique(BRCAnewmodules$colours)
+
+for (color in Colors){
+  print(paste(color,":"))
+  print("\n")
+  Genes <- read.delim(paste0("D:/vytran/OneDrive - JHSPH/Year 3/Evaluate-the-validity-of-the-breast-cancer-cell-line-MCF7-as-a-model-for-breast-cancer-research/STRING ANNOTATIONS/BRCAnewmodules[",color,"].txt", collapse = ""), header=FALSE, stringsAsFactors=FALSE) #Reading the file works better if the full file path is supplied
+  colnames(Genes)<-c("ID1")
+  mygenes <- string_db$map(my_data_frame = Genes, my_data_frame_id_col_names = "ID1", removeUnmappedRows = TRUE )
+  annotation = string_db$get_enrichment(mygenes$STRING_id)
+  write.csv(annotation, file = paste0("D:/vytran/OneDrive - JHSPH/Year 3/Evaluate-the-validity-of-the-breast-cancer-cell-line-MCF7-as-a-model-for-breast-cancer-research/STRING ANNOTATIONS/BRCAannotation", sep ="_", color, ".csv"))
+  #print(string_db$get_enrichment(mygenes$STRING_id))
+  #colorEnrichResult<- enrichr(color, "HomoloGene")
+  #print(colorEnrichResult) 
+}
+```
+Perform annotation for ARCHS4
+```{r}
+#Create a "Colors" vector for the R loop:
+Colors = unique(ARCHS4modules$colours)
+
+for (color in Colors){
+  print(paste(color,":"))
+  print("\n")
+  Genes <- read.delim(paste0("D:/vytran/OneDrive - JHSPH/Year 3/Evaluate-the-validity-of-the-breast-cancer-cell-line-MCF7-as-a-model-for-breast-cancer-research/STRING ANNOTATIONS/ARCHS4newmodules[",color,"].txt", collapse = ""), header=FALSE, stringsAsFactors=FALSE) #Reading the file works better if the full file path is supplied
+  colnames(Genes)<-c("ID1")
+  mygenes <- string_db$map(my_data_frame = Genes, my_data_frame_id_col_names = "ID1", removeUnmappedRows = TRUE )
+  annotation = string_db$get_enrichment(mygenes$STRING_id)
+  write.csv(annotation, file = paste0("D:/vytran/OneDrive - JHSPH/Year 3/Evaluate-the-validity-of-the-breast-cancer-cell-line-MCF7-as-a-model-for-breast-cancer-research/STRING ANNOTATIONS/ARCHS4annotation", sep ="_", color, ".csv"))
+  #print(string_db$get_enrichment(mygenes$STRING_id))
+  #colorEnrichResult<- enrichr(color, "HomoloGene")
+  #print(colorEnrichResult) 
+}
+```
+
+```{r}

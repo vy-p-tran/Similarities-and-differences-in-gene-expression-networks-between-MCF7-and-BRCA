@@ -1,0 +1,368 @@
+---
+title: "MCF7 ARCHS4 analysis and annotations"
+author: "Vy Tran"
+date: "July 29, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Set the working directory:
+```{r}
+filepath = "D:/vytran/OneDrive - JHSPH/Year 3/Evaluate-the-validity-of-the-breast-cancer-cell-line-MCF7-as-a-model-for-breast-cancer-research/ARCHS4 results"
+setwd(filepath)
+getwd()
+```
+  Install Biomanager if needed.
+```{r}
+# R script to download selected samples
+# Copy code and run on a local machine to initiate download
+# Check for dependencies and install if missing
+
+BiocManager::install("genefilter")
+BiocManager::install("sva")
+install.packages(c("dendextend", "colorspace"))
+BiocManager::install("WGCNA")
+```
+Load packages:
+```{r include=FALSE}
+library(sva)
+library(rhdf5)
+library(dendextend)  
+library(colorspace)
+library(WGCNA)
+```
+
+The following setting is important. Do not obmit. By defaults, when you use functions that "read.table()" and "read.csv*()" stringAsFactors is set to TRUE. This would automatically convert columns that are detected to be chracter/strings to be factor variables. We want to keep column values as characters for now. 
+```{r}
+options(stringsAsFactors=FALSE) 
+```
+R script to download selected samples. Before running the below command, the human_matrix.h5 file was manually downloaded from ARCHS4. Check if the file is in the working directory:
+```{r}
+ls()
+destination_file = "human_matrix.h5"
+extracted_expression_file = "MCF7_expression_matrix.tsv"
+url = "https://s3.amazonaws.com/mssm-seq-matrix/human_matrix.h5"
+```
+Check if gene expression file was already downloaded, if not in current directory download file form repository
+```{r}
+if(!file.exists(destination_file)){
+  print("Downloading compressed gene expression matrix.")
+  url = "https://s3.amazonaws.com/mssm-seq-matrix/human_matrix.h5"
+  download.file(url, destination_file, quiet = FALSE)
+} else{
+  print("Local file already exists.")
+}
+```
+Selected samples to be extracted
+```{r}
+samp = c("GSM1207878","GSM1244820","GSM1244811","GSM1244819","GSM1116000","GSM1069746","GSM973681","GSM1115995","GSM1115997","GSM1143675","GSM942209","GSM973687","GSM1244813","GSM1244818","GSM1244812","GSM1244822","GSM1207879","GSM1244809","GSM1244821","GSM1244814","GSM981252","GSM981245","GSM973690","GSM1244817","GSM942211","GSM973672","GSM973682","GSM1244816","GSM1244810","GSM1244815","GSM1154039",
+         "GSM973676","GSM1115999","GSM929909","GSM1115998","GSM1143674","GSM1143673","GSM1069745","GSM942210","GSM1154040","GSM1115996","GSM1143672","GSM929910","GSM2033072","GSM1669173","GSM1669175","GSM1431879","GSM2152854","GSM1900344","GSM1338772","GSM1470034","GSM1669167","GSM1669163","GSM2024863","GSM1704630","GSM1900353","GSM2024871","GSM1431880","GSM1897359","GSM1669180","GSM1900347",
+         "GSM1470033","GSM1847260","GSM2112494","GSM1348545","GSM1900330","GSM1669164","GSM2112495","GSM1669168","GSM2152855","GSM1669183","GSM1669179","GSM1470038","GSM2024864","GSM2024862","GSM1470036","GSM1900333","GSM1900342","GSM1470030","GSM1900346","GSM1669169","GSM1900351","GSM1348551","GSM1922705","GSM1406525","GSM1900343","GSM1669162","GSM1825454","GSM1900345","GSM1406524","GSM1704629",
+         "GSM1669177","GSM1543660","GSM1669166","GSM1825448","GSM1900331","GSM1462977","GSM1348549","GSM2027253","GSM2309313","GSM1825451","GSM2024870","GSM2024865","GSM1669165","GSM1543655","GSM1669172","GSM1897358","GSM1406526","GSM1922703","GSM1348957","GSM1669171","GSM1462976","GSM1543664","GSM2024872","GSM1348550","GSM1922708","GSM1348546","GSM1338773","GSM1470039","GSM2027259","GSM1543643",
+         "GSM1904533","GSM1897362","GSM1406527","GSM1470040","GSM2027256","GSM1470037","GSM2027255","GSM2027261","GSM2024866","GSM2024868","GSM1900341","GSM1543646","GSM1669182","GSM1825453","GSM1431878","GSM1348548","GSM1462972","GSM2027262","GSM1669161","GSM1348547","GSM1669176","GSM1825452","GSM1900338","GSM2112491","GSM1847261","GSM1462973","GSM1666033","GSM1431876","GSM1543662","GSM2112490",
+         "GSM1900350","GSM1669160","GSM2112492","GSM1631321","GSM1669181","GSM2027258","GSM1669170","GSM1505593","GSM1348541","GSM1543644","GSM1543650","GSM1348544","GSM1462974","GSM1682280","GSM1669174","GSM2112493","GSM1264341","GSM1666032","GSM2024869","GSM1543647","GSM2152851","GSM1543649","GSM1543657","GSM1704628","GSM1922704","GSM1900349","GSM1543659","GSM1431877","GSM2152852","GSM1922707",
+         "GSM2152850","GSM1470031","GSM1543648","GSM1543658","GSM2027260","GSM1682279","GSM1543653","GSM1470027","GSM1431881","GSM1543641","GSM1900339","GSM1900348","GSM2152853","GSM1431874","GSM1530029","GSM1470035","GSM1847259","GSM1543652","GSM1900335","GSM1462975","GSM2024861","GSM1264339","GSM1825447","GSM1431870","GSM1543661","GSM1847262","GSM1922706","GSM1431871","GSM1264338","GSM1900332",
+         "GSM1348956","GSM1406528","GSM1470032","GSM2027257","GSM2309314","GSM2309315","GSM1264340","GSM1904534","GSM1470028","GSM1470029","GSM1431873","GSM1543640","GSM1900334","GSM1704627","GSM1897361","GSM1431872","GSM2027254","GSM1348552","GSM1543645","GSM2024867","GSM1900352","GSM1530030","GSM1825450","GSM1543656","GSM1406523","GSM2027263","GSM1264343","GSM2027264","GSM1631320","GSM1543663",
+         "GSM1348542","GSM1543651","GSM1897360","GSM1900337","GSM1900336","GSM1264342","GSM1825449","GSM2068644","GSM2069480","GSM2069476","GSM2068667","GSM2068655","GSM1269467","GSM1944025","GSM2068650","GSM1944027","GSM2071229","GSM2068669","GSM2071230","GSM2069477","GSM2069474","GSM2068658","GSM2068651","GSM2068664","GSM2069478","GSM2069475","GSM2068652","GSM2068645","GSM2068646","GSM2071228",
+         "GSM1944026","GSM2071235","GSM2068653","GSM2069472","GSM2071226","GSM2071234","GSM2071236","GSM1269469","GSM2069473","GSM2071232","GSM1944028","GSM2068648","GSM2068662","GSM2068668","GSM2068672","GSM2069481","GSM2071227","GSM2068663","GSM2068643","GSM2071233","GSM2068661","GSM2068656","GSM2071231","GSM2068659","GSM2068665","GSM2069479","GSM1944030","GSM1944029","GSM1306495","GSM2068671",
+         "GSM2042808","GSM2068670","GSM2069482","GSM2068654","GSM2069483","GSM2068666","GSM2068649","GSM1269468","GSM2068660","GSM2068647","GSM2068657","GSM1348543","GSM1431875","GSM1543642","GSM1543654","GSM1669178","GSM1682278","GSM1897357","GSM1900340","GSM2033073","GSM1908562","GSM1908563","GSM1908560","GSM1908561","GSM1908566","GSM1908567","GSM1908564","GSM1908565","GSM1908548","GSM1908549",
+         "GSM1908544","GSM1908546","GSM1908547","GSM1908540","GSM1908541","GSM1908542","GSM1908553","GSM1908552","GSM1908551","GSM1908550","GSM1908557","GSM1908556","GSM1908555","GSM1908554","GSM1908559","GSM1908558","GSM1908539","GSM1908538","GSM1908545","GSM1908543","GSM2072527","GSM1415615","GSM1415614","GSM1415617","GSM1415616","GSM1415611","GSM1415610","GSM1415613","GSM1415612","GSM2400230",
+         "GSM2400231","GSM2400218","GSM2400219","GSM2072528","GSM897081","GSM1415608","GSM1415609","GSM1415606","GSM1415607","GSM2072571","GSM2072572","GSM979654","GSM979657","GSM1643968","GSM1643967","GSM1643966","GSM1643984","GSM1643969","GSM1643974","GSM1643971","GSM1643988","GSM1643979","GSM1643965","GSM1643983","GSM1643975","GSM1643972","GSM1643989","GSM1643976","GSM1643977","GSM1643985",
+         "GSM1643978","GSM1643964","GSM1643987","GSM1643982","GSM1643981","GSM1643980","GSM1643973","GSM1643986","GSM1643970","GSM1915702","GSM1915700","GSM1915701","GSM1915699","GSM1915703","GSM1915698","GSM2300036","GSM2300033","GSM2300032","GSM2300037","GSM2300035","GSM2300038","GSM2300034","GSM2300039","GSM2367473","GSM2367471","GSM2367474","GSM2367468","GSM2367470","GSM2367477","GSM2367466",
+         "GSM2367475","GSM2367469","GSM2367476","GSM2367472","GSM2367467","GSM2367486","GSM2367488","GSM2367487","GSM2367485","GSM2367499","GSM2367494","GSM2367491","GSM2367495","GSM2367490","GSM2367497","GSM2367493","GSM2367489","GSM2367492","GSM2367500","GSM2367496","GSM2367498","GSM2392614","GSM2392617","GSM2392611","GSM2392615","GSM2392606","GSM2392619","GSM2392612","GSM2392624","GSM2392629",
+         "GSM2392623","GSM2392622","GSM2392616","GSM2392621","GSM2392620","GSM2392613","GSM2392627","GSM2392625","GSM2392607","GSM2392618","GSM2392610","GSM2392608","GSM2392626","GSM2392628","GSM2392609","GSM2474228","GSM2474229","GSM2474227","GSM2474230","GSM2476256","GSM2476257","GSM2476255","GSM2537142","GSM2537141","GSM2537139","GSM2537140","GSM1919220","GSM1919221","GSM1919222","GSM1919223",
+         "GSM1919224","GSM1919225","GSM1919226","GSM1919227","GSM1919228","GSM1919229","GSM1919230","GSM1919231","GSM1978810","GSM1978811","GSM1978812","GSM1978813","GSM1978814","GSM1978815","GSM1978816","GSM1978817","GSM2545229","GSM2545230","GSM2545231","GSM2545232","GSM2574347","GSM2574348","GSM2871734","GSM2871735","GSM2871736","GSM2871737","GSM2871738","GSM2871739","GSM2871740","GSM2871741",
+         "GSM2871742","GSM2871743","GSM2871744","GSM2871745","GSM2871746","GSM2871747","GSM2871748","GSM2871749","GSM2871750","GSM2871751","GSM1702268","GSM1702269","GSM2296635","GSM2296637","GSM2296640","GSM2296641","GSM2339025","GSM2339026","GSM2339027","GSM2339028","GSM2339029","GSM2339030","GSM2339031","GSM2339032","GSM2339033","GSM2339034","GSM2339035","GSM2339036","GSM2339037","GSM2339038",
+         "GSM2339039","GSM2474911","GSM2474912","GSM2474913","GSM2474914","GSM2474915","GSM2474916","GSM2714254","GSM2714255","GSM2714256","GSM2714257","GSM2714258","GSM2714259","GSM2714260","GSM2714261","GSM2714262","GSM2714263","GSM2714264","GSM2714265","GSM2845391","GSM2845392","GSM2845393","GSM2845394","GSM2845505","GSM2845506","GSM2845507","GSM2845508","GSM2845509","GSM2845510","GSM2845511",
+         "GSM2845512","GSM2845513","GSM2845514","GSM2845515","GSM2845516","GSM2845517","GSM2845518","GSM2845519","GSM2845520","GSM2845521","GSM2845522","GSM2773013","GSM2773014","GSM2773015","GSM2773016","GSM2773017","GSM2773018","GSM2773019","GSM2773020","GSM2911294","GSM2911295","GSM2911296","GSM2911297","GSM2911298","GSM2911299","GSM2102803","GSM2102804","GSM2691343","GSM2691344","GSM2878306",
+         "GSM2878307","GSM2878308","GSM2878309","GSM2878310","GSM2878311","GSM2982836","GSM2982837","GSM2982838","GSM2982839","GSM1939609","GSM1939610","GSM1939611","GSM1939612","GSM1939613","GSM1939614","GSM1939633","GSM1939634","GSM1939635","GSM1939636","GSM1939637","GSM1939638","GSM2064538","GSM2064539","GSM2064540","GSM2064541","GSM2064542","GSM2064543","GSM2151685","GSM2151686","GSM2151687",
+         "GSM2151688","GSM2151689","GSM2151690","GSM2159807","GSM2159808","GSM2159809","GSM2159810","GSM2159811","GSM2159812","GSM2159813","GSM2159814","GSM2159815","GSM2227407","GSM2227408","GSM2227409","GSM2227410","GSM2300040","GSM2300041","GSM2300042","GSM2300043","GSM2305321","GSM2305322","GSM2305323","GSM2305324","GSM2305325","GSM2305326","GSM2305327","GSM2305328","GSM2305329","GSM2305330",
+         "GSM2422628","GSM2422629","GSM2422630","GSM2422631","GSM2422632","GSM2422633","GSM2422634","GSM2422635","GSM2422636","GSM2422637","GSM2422638","GSM2422639","GSM2422640","GSM2422641","GSM2422642","GSM2422643","GSM2422645","GSM2422646","GSM2422647","GSM2422661","GSM2422662","GSM2422663","GSM2422664","GSM2422665","GSM2422666","GSM2422667","GSM2422668","GSM2422669","GSM2422701","GSM2422702",
+         "GSM2422703","GSM2422704","GSM2422705","GSM2422706","GSM2422707","GSM2422708","GSM2422709","GSM2422710","GSM2422711","GSM2422712","GSM2422725","GSM2422726","GSM2422727","GSM2422728","GSM2422729","GSM2422730","GSM2422737","GSM2422738","GSM2422739","GSM2422740","GSM2422741","GSM2422742","GSM2422743","GSM2422744","GSM2422745","GSM2422746","GSM2422747","GSM2422748","GSM2422749","GSM2422750",
+         "GSM2422751","GSM2422752","GSM2422753","GSM2422754","GSM2422755","GSM2422756","GSM2422757","GSM2476757","GSM2476758","GSM2476759","GSM2476760","GSM2476761","GSM2476762","GSM2476763","GSM2476764","GSM2476765","GSM2476766","GSM2476767","GSM2476768","GSM2476769","GSM2476770","GSM2476771","GSM2476772","GSM2476773","GSM2476774","GSM2476775","GSM2476776","GSM2476777","GSM2476778","GSM2476779",
+         "GSM2476780","GSM2476781","GSM2476782","GSM2476783","GSM2476784","GSM2476785","GSM2476786","GSM2476787","GSM2476788","GSM2476789","GSM2476790","GSM2476791","GSM2476792","GSM2476793","GSM2476794","GSM2476795","GSM2476796","GSM2476797","GSM2476798","GSM2476799","GSM2476800","GSM2476801","GSM2476802","GSM2476803","GSM2476804","GSM2476805","GSM2476806","GSM2476807","GSM2476808","GSM2476809",
+         "GSM2476810","GSM2628140","GSM2628141","GSM2628142","GSM2628143","GSM2628144","GSM2628145","GSM2648904","GSM2648905","GSM2648906","GSM2648907","GSM2648908","GSM2648909","GSM2648910","GSM2648911","GSM2648912","GSM2648913","GSM2671215","GSM2671216","GSM2671217","GSM2671218","GSM2671219","GSM2671220","GSM2671221","GSM2671222","GSM2671223","GSM2671224","GSM2671225","GSM2671226","GSM2671227",
+         "GSM2671228","GSM2671229","GSM2671230","GSM2671231","GSM2671232","GSM2671233","GSM2671234","GSM2671235","GSM2671236","GSM2671237","GSM2671238","GSM2671239","GSM2671240","GSM2671241","GSM2671242","GSM2671243","GSM2671244","GSM2671245","GSM2671246","GSM2671247","GSM2671248","GSM2671249","GSM2671250","GSM2671251","GSM2671252","GSM2671253","GSM2671254","GSM2671255","GSM2671256","GSM2671257",
+         "GSM2671258","GSM2671259","GSM2671260","GSM2671261","GSM2671262","GSM2671263","GSM2671264","GSM2671265","GSM2671266","GSM2671267","GSM2671268","GSM2671269","GSM2671270","GSM2671271","GSM2671272","GSM2671273","GSM2671274","GSM2671275","GSM2671276","GSM2671277","GSM2671278","GSM2671279","GSM2671280","GSM2671281","GSM2671282","GSM2671283","GSM2671284","GSM2671285","GSM2671286","GSM2671287",
+         "GSM2671288","GSM2671289","GSM2842596","GSM2842597","GSM2842598","GSM2842599","GSM2842600","GSM2842601","GSM2702239","GSM2702240","GSM2702241","GSM2702242","GSM2702243","GSM2702244","GSM2702245","GSM2702246","GSM2702247","GSM2702248","GSM2702249","GSM2702250","GSM2598395","GSM2598396","GSM2598397","GSM2804009","GSM2804010","GSM2804011","GSM2804012","GSM2804013","GSM2804014","GSM2891828",
+         "GSM2891829","GSM2891834","GSM2891835","GSM2741793","GSM2741794","GSM2741795","GSM2741796","GSM2741797","GSM2741798","GSM2741799","GSM2741800","GSM2741801","GSM2741802","GSM2741803","GSM2741804","GSM2046892","GSM2046893","GSM2046894","GSM2046895","GSM2046896","GSM2255508","GSM2255509","GSM2255510","GSM2255511","GSM2255512","GSM2255513","GSM2255514","GSM2255515","GSM2255516","GSM2255517",
+         "GSM2255518","GSM2255519","GSM2255520","GSM2255521","GSM2255522","GSM2255523","GSM2255524","GSM2255525","GSM2255526","GSM2255527","GSM2255528","GSM2255529","GSM2255530","GSM2255531","GSM2255532","GSM2255533","GSM2255534","GSM2255535","GSM2255536","GSM2255537","GSM2255538","GSM2255539","GSM2255540","GSM2255541","GSM2255542","GSM2255543","GSM2501535","GSM2501536","GSM2501537","GSM2501538",
+         "GSM2501539","GSM2501540","GSM2501541","GSM2501542","GSM2501543","GSM2741787","GSM2741788","GSM2741789","GSM2741790","GSM2741791","GSM2741792","GSM3017117","GSM3184909","GSM3184910","GSM3184911","GSM3184912","GSM3184913","GSM3184914","GSM3184915","GSM3184916","GSM3184917","GSM3184918","GSM3014940","GSM3014941","GSM3014942","GSM3014943","GSM3014944","GSM3014945","GSM1847019","GSM1847020",
+         "GSM2028919","GSM2028920","GSM2028921","GSM2028922","GSM2028923","GSM2028924","GSM2735981","GSM2735982","GSM2735983","GSM2735985","GSM2735986","GSM2735987","GSM2735988","GSM2735989","GSM2735990","GSM2735992","GSM2735993","GSM2735994","GSM2735995","GSM2735997","GSM2735998","GSM2735999","GSM2736000","GSM2736001","GSM1331310","GSM1331312","GSM1331314","GSM1331316","GSM1331318","GSM2044758",
+         "GSM2044759","GSM2044760","GSM2044762","GSM1334453","GSM1334454","GSM1334456","GSM1334460","GSM1334461","GSM2631372","GSM2631373","GSM2631374","")
+```
+Retrieve information from compressed data
+```{r}
+samples = h5read(destination_file, "meta/Sample_geo_accession")
+tissue = h5read(destination_file, "meta/Sample_source_name_ch1")
+genes = h5read(destination_file, "meta/genes")
+series = h5read(destination_file, "meta/Sample_series_id")
+```
+Identify columns to be extracted
+```{r}
+sample_locations = which(samples %in% samp)
+series = series[sample_locations]
+
+# Extract gene expression from compressed data
+expression = h5read(destination_file, "data/expression", index=list(1:length(genes), sample_locations))
+H5close()
+```
+
+Quantile normalization:
+```{r}
+expression = normalize.quantiles(expression)
+class(expression)
+is.numeric(expression) #Expression is a numeric matrix
+
+rownames(expression) = genes
+colnames(expression) = samples[sample_locations]
+
+# Filter genes whose expression is zero in more than 50% of the samples:
+RNA_MCF7 = expression
+colnames(RNA_MCF7) = colnames(expression)
+row.names(RNA_MCF7) = row.names(expression)
+RNA_MCF7 = RNA_MCF7[apply(RNA_MCF7,1,function(x) sum(x==0))<ncol(RNA_MCF7)*0.5,]
+dim(RNA_MCF7)
+
+######################################
+
+# voom normalization:
+# As read counts follow a negative binomial distribution, which has a mathematical theory less tractable than 
+#that of the normal distribution, RNAseq data was normalised with the voom methodology. The voom method estimates
+#the mean-variance of the log-counts and generates a precision weight for each observation. 
+#This way, a comparative analysis can be performed with all bioinformatic workflows originally developed for microarray analyses.
+library(limma)
+RNA_MCF7_voom = voom(RNA_MCF7)$E
+
+# and check how data look, they should look normally-ish distributed
+hist(RNA_MCF7_voom, main = "Distribution of gene expression for MCF7 after data preprocessing")
+
+#######################################
+
+# CHECK IF THE MCF7 EXPRESSION DATA NEEDS BATCH EFFECT CORRECTION:
+
+#Construct a correlation matrix based on Pearson correlation:
+cc_MCF7 = cor(RNA_MCF7_voom)
+
+# Construct a dendrogram 
+dend_MCF7 = as.dendrogram(hclust(as.dist(1-cc_MCF7)))  #Use correlation as distance 
+
+useries = unique(series)
+series_match = useries[match(series, useries)] 
+
+colos = colorspace::rainbow_hcl(length(useries), c =  160, l = 50)
+names(colos) = useries
+series_color = colos[series_match]
+
+clu = cutree(dend_MCF7, h = 0.25)
+labels_colors(dend_MCF7) = series_color[order.dendrogram(dend_MCF7)]
+dend_MCF7 = color_branches(dend_MCF7, h = 0.25)
+
+par(mar = c(3,1,1,10))
+plot(dend_MCF7, horiz = TRUE)
+colored_bars(cbind(clu, series_color), dend_MCF7, rowLabels = c("Cluster", "series"), horiz = TRUE)
+legend("topleft", legend = useries, fill = colos, bg = "white", cex = 0.35)
+
+#Obtaining largest cluster:
+largest_cluster = names(rev(sort(table(clu))))[1]
+ww = which(clu == largest_cluster)
+plot(density(cor(RNA_MCF7_voom[,ww])), lwd = 3, main = "correlation of leftover samples")
+
+reduced_RNA_MCF7_voom = RNA_MCF7_voom[, ww]
+reduced_series = series[ww]
+
+###BATCH EFFECT REMOVEL WITH COMBAT SVA ################
+
+batchid = match(reduced_series, unique(reduced_series))
+batch_corrected_RNA_MCF7_voom = ComBat(dat=reduced_RNA_MCF7_voom, batch=batchid, par.prior=TRUE, prior.plots=FALSE)
+
+#Construct a correlation matrix based on Pearson correlation:
+cc = cor(batch_corrected_RNA_MCF7_voom)
+
+# Construct a dendrogram 
+dend_MCF7_combat = as.dendrogram(hclust(as.dist(1-cc)))  #Use correlation as distance 
+
+useries = unique(reduced_series)
+series_match = useries[match(reduced_series, useries)] 
+
+colos = colorspace::rainbow_hcl(length(useries), c =  160, l = 50)
+names(colos) = useries
+series_color = colos[series_match]
+
+clu = cutree(dend_MCF7_combat, h = 0.25)
+labels_colors(dend_MCF7_combat) = series_color[order.dendrogram(dend_MCF7_combat)]
+dend_MCF7_combat = color_branches(dend_MCF7_combat, h = 0.25)
+
+
+par(mar = c(3,1,1,10))
+plot(dend_MCF7_combat, horiz = TRUE)
+colored_bars(cbind(clu, series_color), dend_MCF7_combat, rowLabels = c("Cluster", "series"), horiz = TRUE)
+legend("topleft", legend = useries, fill = colos, bg = "white", cex = 0.35)
+
+
+#After the batch effect removal (series are batches) the variablility is significantly reduced. The pairwise correlation of the gene expression 
+# is higher as shown in the plot below.
+
+par(mar = c(2,4,4,4))
+plot(density(cor(RNA_MCF7_voom[,ww])), lwd = 3, main = "correlation of leftover samples", ylim = c(0, 80))
+lines(density(cor(batch_corrected_RNA_MCF7_voom)), lwd = 3, main = "correlation of leftover samples", col = "red")
+legend("topleft", legend = c("uncorrected", "corrected"), lty = 1, lwd =3, col = c("black", "red"))
+
+#Save the expression file and corrected expression file:
+save(batch_corrected_RNA_MCF7_voom, file = "ARCHS4_MCF7.Rdata")
+
+hist(batch_corrected_RNA_MCF7_voom)
+
+#Save the data:
+save(batch_corrected_RNA_MCF7_voom, file = "batch_corrected_RNA_MCF7_ARCHS4.Rdata")
+```
+
+Load the "batch_corrected_RNA_MCF7_voom" file:
+```{r}
+load("D:/vytran/OneDrive - JHSPH/Year 3/Evaluate-the-validity-of-the-breast-cancer-cell-line-MCF7-as-a-model-for-breast-cancer-research/ARCHS4 results/batch_corrected_RNA_MCF7_ARCHS4.Rdata")
+colnames(batch_corrected_RNA_MCF7_voom)[1:10]
+row.names(batch_corrected_RNA_MCF7_voom)[1:10]
+is.matrix(batch_corrected_RNA_MCF7_voom)
+is.numeric(batch_corrected_RNA_MCF7_voom)
+```
+
+```{r}
+########################################################
+#Run WGCNA analysis of ARCHS4 MCF7 data:
+
+#Transpose matrix and filter for 10,000 most variant genes:
+ARCHS4data = t(batch_corrected_RNA_MCF7_voom[order(apply(batch_corrected_RNA_MCF7_voom,1,mad), decreasing = T)[1:10000],])
+dim(ARCHS4data)
+```
+
+```{r}
+#Check if ARCHS4data have many missing values:
+gsg = goodSamplesGenes(ARCHS4data, verbose = 3)
+gsg$allOK
+```
+
+```{r}
+#The command returns "TRUE", so all genes have passed the cuts.
+#################################################################################################
+
+# Re-cluster the samples (in contrast to clustering genes that will come later) to see if there are any obvious outliers:
+sampleTree = hclust(dist(ARCHS4data), method = "average")
+# Plot the sample tree:
+sizeGrWindow(12,9)
+
+pdf(file = "D:/vytran/OneDrive - JHSPH/Year 3/Evaluate-the-validity-of-the-breast-cancer-cell-line-MCF7-as-a-model-for-breast-cancer-research/ARCHS4 results/Sample clustering to detect outliers_ARCHS4.pdf", width = 12, height = 9);
+par(cex = 0.6);
+par(mar = c(0,4,2,0))
+plot(sampleTree, main = "Sample clustering to detect outliers", sub="", xlab="", cex.lab = 1.5,
+     cex.axis = 1.5, cex.main = 2)
+
+dev.off()
+```
+
+```{r}
+# Choose a set of soft-thresholding powers
+powers = c(c(1:10), seq(from = 12, to=20, by=2))
+# Call the network topology analysis function
+sft = pickSoftThreshold(ARCHS4data, powerVector = powers, verbose = 5)
+
+# Plot the results:
+sizeGrWindow(9, 5)
+par(mfrow = c(1,2));
+cex1 = 0.9;
+pdf(file = "D:/vytran/OneDrive - JHSPH/Year 3/Evaluate-the-validity-of-the-breast-cancer-cell-line-MCF7-as-a-model-for-breast-cancer-research/ARCHS4 results/Soft threshold power for ARCHS4.pdf")
+# Scale-free topology fit index as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     xlab="Soft Threshold (power)",ylab="Scale Free Topology Model Fit,signed R^2",type="n",
+     main = paste("Scale independence"));
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     labels=powers,cex=cex1,col="red");
+# this line corresponds to using an R^2 cut-off of h
+abline(h=0.90,col="red")
+# Mean connectivity as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], sft$fitIndices[,5],
+     xlab="Soft Threshold (power)",ylab="Mean Connectivity", type="n",
+     main = paste("Mean connectivity"))
+text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers, cex=cex1,col="red")
+dev.off()
+```
+
+```{r}
+
+# Based on the scale-free topology graph, the soft-thresholding power of 6 was chosen.
+
+# Constructing the gene network and identifying modules:
+net_ARCHS4 = blockwiseModules(ARCHS4data, power = 5,
+                            TOMType = "unsigned", minModuleSize = 100,
+                            reassignThreshold = 0, mergeCutHeight = 0.25,
+                            numericLabels = TRUE, pamRespectsDendro = FALSE,
+                            saveTOMs = TRUE,
+                            saveTOMFileBase = "ARCHS4TOM",
+                            verbose = 3)
+```
+
+```{r}
+# To see how many modules were identified and what the module sizes are, one can use table(net$colors).
+table(net_ARCHS4$colors)
+#################################################################################################
+
+# Now we can visualize the modules.
+
+# Convert labels to colors for plotting
+mergedColors_ARCHS4 = labels2colors(net_ARCHS4$colors)
+
+# Plot the dendrogram and the module colors underneath
+pdf("D:/vytran/OneDrive - JHSPH/Year 3/Evaluate-the-validity-of-the-breast-cancer-cell-line-MCF7-as-a-model-for-breast-cancer-research/ARCHS4 results/Cluster dendrogram for ARCHS4_power 5_min module size 100.pdf")
+plotDendroAndColors(net_ARCHS4$dendrograms[[1]], mergedColors_ARCHS4[net_ARCHS4$blockGenes[[1]]],
+                    "Module colors",
+                    dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05, main = "Cluster dendrogram for ARCHS4")
+dev.off()
+```
+
+```{r}
+# We now save the module assignment and module eigengene information necessary for subsequent analysis:
+moduleLabels_ARCHS4 = net_ARCHS4$colors
+moduleColors_ARCHS4 = labels2colors(net_ARCHS4$colors)
+MEs_ARCHS4 = net_ARCHS4$MEs;
+geneTree_ARCHS4 = net_ARCHS4$dendrograms[[1]];
+#save(MEs_ARCHS4, moduleLabels_ARCHS4, moduleColors_ARCHS4, geneTree_ARCHS4,
+     #file = "ARCHS4network_modulecolor_and_label.RData")
+
+# Define numbers of genes and samples
+nGenes = ncol(ARCHS4data)
+nSamples = nrow(ARCHS4data)
+
+# Recalculate MEs with color labels
+MEs0_ARCHS4 = moduleEigengenes(ARCHS4data, moduleColors_ARCHS4)$eigengenes
+MEs_ARCHS4 = orderMEs(MEs0_ARCHS4)
+
+#Calculate module membership to identify important genes. 
+# names (colors) of the modules
+modNames_ARCHS4 = substring(names(MEs_ARCHS4), 3)
+
+geneModuleMembership_ARCHS4 = as.data.frame(cor(ARCHS4data, MEs_ARCHS4, use = "p"));
+MMPvalue_ARCHS4 = as.data.frame(corPvalueStudent(as.matrix(geneModuleMembership_ARCHS4), nSamples));
+
+names(geneModuleMembership_ARCHS4) = paste("MM", modNames_ARCHS4, sep="");
+names(MMPvalue_ARCHS4) = paste("p.MM", modNames_ARCHS4, sep="");
+#################################################################################################
+
+#We now create a data frame holding the following information for all genes: gene names, 
+#module color,and module membership and p-values in all modules: 
+
+# Create the starting data frame
+geneInfoARCHS4 = data.frame(Genename = colnames(ARCHS4data),
+                          moduleColor = moduleColors_ARCHS4,
+                          geneModuleMembership_ARCHS4,
+                          MMPvalue_ARCHS4)
+
+#Order the genes in the geneInfo variable by module color:
+geneOrder_ARCHS4 = order(geneInfoARCHS4$moduleColor)
+geneInfoARCHS4_1 = geneInfoARCHS4[geneOrder_ARCHS4, ]
+
+write.csv(geneInfoARCHS4_1, file = "D:/vytran/OneDrive - JHSPH/Year 3/Evaluate-the-validity-of-the-breast-cancer-cell-line-MCF7-as-a-model-for-breast-cancer-research/ARCHS4 results/ARCHS4_geneMM.csv")
+
+```
+

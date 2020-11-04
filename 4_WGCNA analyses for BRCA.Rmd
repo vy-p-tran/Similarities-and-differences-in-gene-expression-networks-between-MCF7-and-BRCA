@@ -1,0 +1,480 @@
+---
+title: "BRCA whole data set analysis"
+author: "Vy Tran"
+date: "August 24, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+filepath = "D:/vytran/OneDrive - JHSPH/Year 3/Evaluate-the-validity-of-the-breast-cancer-cell-line-MCF7-as-a-model-for-breast-cancer-research/"
+setwd(filepath)
+getwd()
+options(stringsAsFactors=FALSE) 
+```
+
+```{r library}
+library(WGCNA)
+library(GEOquery)
+library(stringr)
+library(tidyverse)
+library(limma)
+```
+
+#ANALYSIS OF BRCA DATA 
+
+############# Data preprocessing ##############
+```{r}
+# Input counts and filter genes whose expression if zero in more than 50% of the samples:
+RNA_BRCA = BRCA.rnaseqv2__illuminahiseq_rnaseqv2__unc_edu__Level_3__RSEM_genes_normalized__data.data
+`BRCARN~1` = RNA_BRCA
+colnames(RNA_BRCA) = `BRCARN~1`[1,]
+row.names(RNA_BRCA) = `BRCARN~1`[,1]
+RNA_BRCA = RNA_BRCA[-c(1,2),-1] #Remove the uninformative data.
+RNA_BRCA1 = as.matrix(sapply(RNA_BRCA, as.numeric))
+colnames(RNA_BRCA1) = colnames(RNA_BRCA)
+row.names(RNA_BRCA1) = row.names(RNA_BRCA)
+class(RNA_BRCA1)
+is.numeric(RNA_BRCA1)
+RNA_BRCA1 = RNA_BRCA1[apply(RNA_BRCA1,1,function(x) sum(x==0))<ncol(RNA_BRCA1)*0.5,]
+dim(RNA_BRCA1)
+```
+
+```{r}
+
+#transpose matrix to correlate genes in the following:
+WGCNA_matrix_BRCA = t(RNA_BRCA1[order(apply(RNA_BRCA1,1,mad), decreasing = T)[1:10000],])
+dim(WGCNA_matrix_BRCA)
+gsg = goodSamplesGenes(WGCNA_matrix_BRCA, verbose = 3)
+gsg$allOK #all genes have passed the cuts
+
+```
+
+```{r}
+#Perform PCA on the data:
+pca_BRCA = prcomp(WGCNA_matrix_BRCA)
+
+sizeGrWindow(12,12)
+plot(pca_BRCA$x)
+
+#Plot with colors:
+#install.packages("ggfortify")
+library(ggfortify)
+
+pca.plot <- autoplot(pca_BRCA, data = WGCNA_matrix_BRCA, colour = 'blue')
+pca.plot
+
+```
+
+```{r}
+
+# Re-cluster the samples (in contrast to clustering genes that will come later) to see if there are any obvious
+#outliers:
+sampleTree_BRCA = hclust(dist(WGCNA_matrix_BRCA ), method = "average")
+
+# Plot the sample tree: Open a graphic output window of size 12 by 9 inches
+# The user should change the dimensions if the window is too large or too small.
+sizeGrWindow(12,9)
+pdf(file = "D:/vytran/OneDrive - JHSPH/Year 3/Evaluate-the-validity-of-the-breast-cancer-cell-line-MCF7-as-a-model-for-breast-cancer-research/Entire BRCA/Sample clustering for BRCA.pdf", width = 12, height = 9)
+par(cex = 0.6);
+par(mar = c(0,4,2,0))
+plot(sampleTree_BRCA, main = "Sample clustering to detect outliers", sub="", xlab="", cex.lab = 1.5,
+     cex.axis = 1.5, cex.main = 2)
+dev.off()
+```
+
+#It appears there is no obvious outlier. 
+#The variable BRCAdata now contains the expression data ready for network analysis.
+
+#Choosing the soft-thresholding power. Constructing a weighted gene network entails the choice of the soft thresholding power β to which co-expression
+#similarity is raised to calculate adjacency [1]. The authors of [1] have proposed to choose the soft thresholding power
+#based on the criterion of approximate scale-free topology:
+```{r}
+# Choose a set of soft-thresholding powers
+powers = c(c(1:10), seq(from = 12, to=20, by=2))
+# Call the network topology analysis function
+sft = pickSoftThreshold(data = WGCNA_matrix_BRCA, powerVector = powers, verbose = 5)
+
+# Plot the results:
+sizeGrWindow(9, 5)
+par(mfrow = c(1,2));
+cex1 = 0.9;
+pdf(file = "D:/vytran/OneDrive - JHSPH/Year 3/Evaluate-the-validity-of-the-breast-cancer-cell-line-MCF7-as-a-model-for-breast-cancer-research/Entire BRCA/Supplemental Figure e and f_Scale independence and Mean connectivity for BRCA.pdf")
+# Scale-free topology fit index as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     xlab="Soft Threshold (power)",ylab="Scale Free Topology Model Fit,signed R^2",type="n",
+     main = paste("Scale independence"));
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     labels=powers,cex=cex1,col="red");
+
+# this line corresponds to using an R^2 cut-off of h
+abline(h=0.90,col="red")
+# Mean connectivity as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], sft$fitIndices[,5],
+     xlab="Soft Threshold (power)",ylab="Mean Connectivity", type="n",
+     main = paste("Mean connectivity"))
+text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers, cex=cex1,col="red")
+dev.off()
+```
+#Based on the scale-free topology graph, we choose the power 6.
+```{r}
+# Constructing the gene network and identifying modules. After trying minModuleSize from 20-150, I decided that the best size is 100.
+netBRCA = blockwiseModules(WGCNA_matrix_BRCA, power = 6,
+                           TOMType = "unsigned", minModuleSize = 100, maxBlockSize = 20000,
+                           reassignThreshold = 0, mergeCutHeight = 0.25,
+                           numericLabels = TRUE, pamRespectsDendro = FALSE,
+                           saveTOMs = TRUE,
+                           saveTOMFileBase = "BRCATOM",
+                           verbose = 3)
+```
+
+```{r}
+
+# To see how many modules were identified and what the module sizes are, one can use table(net$colors).
+table(netBRCA$colors)
+
+# open a graphics window
+sizeGrWindow(12, 9)
+# Convert labels to colors for plotting
+mergedColors_BRCA = labels2colors(netBRCA$colors)
+
+# Plot the dendrogram and the module colors underneath
+pdf(file = "Cluster dendrogram for entire BRCA power 6 min module size 100 August 2020.pdf", width = 12, height = 9)
+plotDendroAndColors(netBRCA$dendrograms[[1]], mergedColors_BRCA[netBRCA$blockGenes[[1]]],
+                    "Module colors",
+                    dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05, main = "Cluster dendrogram for BRCA")
+dev.off()
+```
+
+```{r}
+# We now save the module assignment and module eigengene information necessary for subsequent analysis:
+moduleLabels_BRCA = netBRCA$colors
+moduleColors_BRCA = labels2colors(netBRCA$colors)
+MEs_BRCA = netBRCA$MEs;
+geneTree_BRCA = netBRCA$dendrograms[[1]];
+
+# Extract eigengenes:
+# Define numbers of genes and samples
+nGenesBRCA = ncol(WGCNA_matrix_BRCA)
+nSamplesBRCA = nrow(WGCNA_matrix_BRCA)
+
+# Recalculate MEs with color labels
+MEs0_BRCA = moduleEigengenes(WGCNA_matrix_BRCA, moduleColors_BRCA)$eigengenes
+MEs_BRCA = orderMEs(MEs0_BRCA)
+
+#Plot eigengene dendrogram:
+sizeGrWindow(6,6);
+par(cex = 1.0)
+plotEigengeneNetworks(MEs_BRCA, "Eigengene dendrogram for BRCA", marDendro = c(0,4,2,0),
+                      plotHeatmaps = FALSE)
+```
+
+```{r}
+
+#Calculate module membership to identify important genes. Module membership is defined as the correlation of the module eigengene 
+# with gene expression profile of the gene.
+# names (colors) of the modules
+modNames_BRCA = substring(names(MEs_BRCA), 3)
+
+geneModuleMembership_BRCA = as.data.frame(cor(WGCNA_matrix_BRCA, MEs_BRCA, use = "p"));
+MMPvalue_BRCA = as.data.frame(corPvalueStudent(as.matrix(geneModuleMembership_BRCA), nSamplesBRCA));
+
+names(geneModuleMembership_BRCA) = paste("MM", modNames_BRCA, sep="");
+names(MMPvalue_BRCA) = paste("p.MM", modNames_BRCA, sep="");
+
+#We now create a data frame holding the following information for all genes: gene names, 
+#module color,and module membership and p-values in all modules: 
+
+# Create the starting data frame
+geneInfoBRCA = data.frame(Genename = colnames(WGCNA_matrix_BRCA),
+                          moduleColor = moduleColors_BRCA,
+                          geneModuleMembership_BRCA,
+                          MMPvalue_BRCA)
+
+#Order the genes in the geneInfo variable by module color:
+geneOrder_BRCA = order(geneInfoBRCA$moduleColor)
+geneInfoBRCA_1 = geneInfoBRCA[geneOrder_BRCA, ]
+
+# Save the data frame into a text-format spreadsheet:
+write.csv(geneInfoBRCA_1, file = "08252020_BRCA entire set_geneMM.csv")
+```
+
+View the module colors and check the number module:
+```{r}
+unique(moduleColors_BRCA)
+length(unique(moduleColors_BRCA))
+table(geneInfoBRCA_1$moduleColor)
+```
+Now we create a network file for BRCA and extract the module with BRCA1:
+```{r}
+# Recalculate topological overlap if needed
+TOM = TOMsimilarityFromExpr(WGCNA_matrix_BRCA, power = 6)
+```
+Extract the grey module that contains BRCA1:
+
+```{r}
+# Select modules
+modules = c("turquoise")
+
+# Select module probes
+Genes = colnames(WGCNA_matrix_BRCA)
+inModule = is.finite(match(moduleColors_BRCA, modules))
+modGenes =Genes[inModule]
+
+# Select the corresponding Topological Overlap
+modTOM = TOM[inModule, inModule]
+dimnames(modTOM) = list(modGenes, modGenes)
+
+# Export the network into edge and node list files Cytoscape can read
+cyt = exportNetworkToCytoscape(modTOM,
+                               edgeFile = paste("BRCA entire_edges_08272020_", paste(modules, collapse="_"), ".txt", sep=""),
+                               nodeFile = paste("BRCA entire_nodes_08272020", paste(modules, collapse="_"), ".txt", sep=""),
+                               weighted = TRUE,
+                               threshold = 0.1,
+                               nodeNames = modGenes,
+                               nodeAttr = moduleColors_BRCA[inModule])
+```
+We also need to get top genes in BRCA network based on scaled connectivity. It takes a long time to computure, so save important progress just in case my computer crash:
+```{r}
+fun = fundamentalNetworkConcepts(TOM, GS = NULL) #May take > 30 minutes to compute
+#We want the scaled connectivity k = connectivity/max(connectivity), which is an indication of hub gene significance.
+connectivity_BRCA = as.data.frame(fun$ScaledConnectivity)
+row.names(connectivity_BRCA) = colnames(WGCNA_matrix_BRCA)
+connectivity_BRCA = as.data.frame(connectivity_BRCA)
+write.csv(connectivity_BRCA, file = "scaled_connectivity_entire BRCA 09012020.csv")
+
+```
+Next, I extract genes with connectivity > 0.70 and inputed these genes into canSAR gene/protein annotation tool to find  ligand druggability score. The results are plotted in the figure below:
+```{r}
+BRCA_druggability = BRCA_top_connectivity.genes_CANSAR.score
+score = BRCA_druggability[,c(3,23)]
+```
+
+```{r}
+png(file="BRCA top connected gene druggability.png",width=400,height=800)
+par(mar=c(5, 7,  2, 2))
+barplot(names.arg = score$gene_name, score$ligand_druggability_score, horiz =TRUE, xlab = c("Ligand druggability score"), col = "steelblue4", border = c("white"), las =1, cex.names = 1, space = c(1.5), xlim = c(-3,3))
+dev.off()
+```
+I also obtained druggability scores for all 10,000 genes in GSE and selected top 20 genes with highest scores. The top 20 genes with highest ligand druggability scores of BRCA and GEO are plotted side by side:
+
+```{r}
+
+GEO_top_druggability = GEO_ligand_druggability_combined_10000_genes[, c(2,22)]
+GEO_top_druggability = GEO_top_druggability[!duplicated(GEO_top_druggability$gene_name), ]
+attach(GEO_top_druggability)
+GEO_top_20_ligand_druggability_genes = GEO_top_druggability[order(-ligand_druggability_score),]
+detach(GEO_top_druggability)
+
+GEO_top_20_ligand_druggability_genes = GEO_top_20_ligand_druggability_genes[1:20,]
+
+GEO_top_20_ligand_druggability_genes = GEO_top_20_ligand_druggability_genes[order(GEO_top_20_ligand_druggability_genes$ligand_druggability_score), ]
+
+attach(BRCA_top_20_ligand_druggability_genes)
+BRCA_top_20_ligand_druggability_genes = BRCA_top_20_ligand_druggability_genes[order(ligand_druggability_score),]
+detach(BRCA_top_20_ligand_druggability_genes)
+
+
+jpeg(file= "GEO and BRCA genes with highest ligand druggability scores among 10000 genes.jpeg", width = 3000, height = 3000, res = 300) 
+
+par(mfrow=c(1,2), mar=c(5.1, 7, 4.1, 2.1))
+
+barplot(names.arg = GEO_top_20_ligand_druggability_genes$gene_name, GEO_top_20_ligand_druggability_genes$ligand_druggability_score, horiz =TRUE, xlab = c("Ligand druggability score"), col = "darkslategray", border = c("white"), las =1, cex.names = 1, space = c(1.5), xlim = c(0,3.5))
+title(main ="a", adj=0, line=2, font=2, cex.main = 2)
+
+barplot(names.arg = BRCA_top_20_ligand_druggability_genes$gene_name, BRCA_top_20_ligand_druggability_genes$ligand_druggability_score, horiz =TRUE, xlab = c("Ligand druggability score"), col = "darkslategray", border = c("white"), las =1, cex.names = 1, space = c(1.5), xlim = c(0,3.5))
+title(main ="b", adj=0, line=2, font=2, cex.main = 2)
+
+dev.off()
+
+```
+How much of the top 20 genes are overlapped?
+```{r}
+ligand_intersect = intersect(GEO_top_20_ligand_druggability_genes$gene_name, BRCA_top_20_ligand_druggability_genes$gene_name)
+
+ligand_intersect
+
+length(ligand_intersect)
+```
+I also obtained druggability scores for all 10,000 genes in BRCA and selected top 20 genes with highest scores. The plot is below:
+
+```{r}
+attach(BRCA_top_20_ligand_druggability_genes)
+BRCA_top_20_ligand_druggability_genes = BRCA_top_20_ligand_druggability_genes[order(ligand_druggability_score),]
+detach(BRCA_top_20_ligand_druggability_genes)
+png(file="BRCA genes with highest ligand druggability scores among 10000 genes.png",width=400,height=800)
+par(mar=c(5, 7,  2, 2))
+barplot(names.arg = BRCA_top_20_ligand_druggability_genes$gene_name, BRCA_top_20_ligand_druggability_genes$ligand_druggability_score, horiz =TRUE, xlab = c("Ligand druggability score"), col = "darkslategray", border = c("white"), las =1, cex.names = 1, space = c(1.5), xlim = c(0,3))
+dev.off()
+```
+
+```{r}
+BRCA_gene = `07192020_BRCA_geneMM`
+table(BRCA_gene$moduleColor)
+```
+
+
+```{r}
+
+############# Relating the consensus modules to brca set-specific modules #############
+
+# June 26, 2019
+
+# Set working directory:
+setwd("C:/Users/vytran/OneDrive - JHSPH/1_Current projects/20190624_BRCA data")
+getwd()
+
+# Recalculate BRCA values:
+moduleLabels_BRCA = netBRCA$colors
+moduleColors_BRCA = labels2colors(netBRCA$colors)
+MEs_BRCA = netBRCA$MEs;
+MEs_BRCA = orderMEs(MEs_BRCA, greyName = "ME0")
+geneTree_BRCA = netBRCA$dendrograms[[1]];
+
+#The BRCA network analysis results are representated by the variables MEs_BRCA, moduleLabels_BRCA, moduleCorlors_BRCA and geneTree_BRCA.
+#The consensus network analysis results are represented by the variables consMEs, moduleLabels, moduleColors, and
+#consTree. 
+
+#We are now ready to relate the BRCA modules to the consensus modules. We calculate the overlaps
+#of each pair of BRCA-consensus modules, and use the Fisher’s exact test (also known as hypergeometric test) to
+#assign a p-value to each of the pairwise overlaps.
+# Isolate the module labels in the order they appear in ordered module eigengenes
+BRCAModuleLabels = substring(names(MEs_BRCA), 3)
+consModuleLabels = substring(names(consMEs[[1]]$data), 3)
+
+# Convert the numeric module labels to color labels
+BRCAModules = labels2colors(as.numeric(BRCAModuleLabels))
+consModules = labels2colors(as.numeric(consModuleLabels))
+
+# Numbers of MCF7 and consensus modules
+nBRCAMods = length(BRCAModules)
+nConsMods = length(consModules)
+
+# Initialize tables of p-values and of the corresponding counts
+pTable = matrix(0, nrow = nBRCAMods, ncol = nConsMods);
+CountTbl = matrix(0, nrow = nBRCAMods, ncol = nConsMods);
+
+# Execute all pairwaise comparisons
+for (BRCAmod in 1:nBRCAMods)
+  for (cmod in 1:nConsMods)
+  {
+    BRCAMembers = (moduleColors_BRCA == BRCAModules[BRCAmod]);
+    consMembers = (moduleColors == consModules[cmod]);
+    pTable[BRCAmod, cmod] = -log10(fisher.test(BRCAMembers, consMembers, alternative = "greater")$p.value);
+    CountTbl[BRCAmod, cmod] = sum(moduleColors_BRCA == BRCAModules[BRCAmod] & moduleColors ==
+                                    consModules[cmod])
+  }
+
+#To display the p-value and count tables in an informative way, we create a color-coded table of the intersection
+#counts. The colors will indicate the p-value significance:
+
+# Truncate p values smaller than 10^{-50} to 10^{-50}
+pTable[is.infinite(pTable)] = 1.3*max(pTable[is.finite(pTable)]);
+pTable[pTable>50 ] = 50 ;
+# Marginal counts (really module sizes)
+BRCAModTotals = apply(CountTbl, 1, sum)
+consModTotals = apply(CountTbl, 2, sum)
+
+# Actual plotting
+sizeGrWindow(10,7 );
+pdf(file = "20190626_Consensus vs BRCA modules.pdf", wi = 10, he = 7);
+par(mfrow=c(1,1));
+par(cex = 1.0);
+par(mar=c(8, 10.4, 2.7, 1)+0.3);
+# Use function labeledHeatmap to produce the color-coded table with all the trimmings
+labeledHeatmap(Matrix = pTable,
+               xLabels = paste(" ", consModules),
+               yLabels = paste(" ", BRCAModules),
+               colorLabels = TRUE,
+               xSymbols = paste("Cons ", consModules, ": ", consModTotals, sep=""),
+               ySymbols = paste("BRCA ", BRCAModules, ": ", BRCAModTotals, sep=""),
+               textMatrix = CountTbl,
+               colors = greenWhiteRed(100)[50:100],
+               main = "Correspondence of BRCA set-specific and BRCA-BRCA consensus modules",
+               cex.text = 1.0, cex.lab = 1.0, setStdMargins = FALSE);
+dev.off();
+
+#The resulting color-coded table is shown. The table indicates that about half of BRCA set-specific modules have
+#a consensus counterpart. This indirectly shows that the module structure in the MCF7 expression data is
+#quite different to the MCF7 data.
+
+####Identify gene significance for BRCA####
+
+#We can also calculate gene significance using TOM matrix:
+tom_BRCA = TOMsimilarityFromExpr(WGCNA_matrix_BRCA)
+
+fun_BRCA = fundamentalNetworkConcepts(tom_BRCA, GS = NULL) #Take > 30 minutes to run
+
+#Save the fundamental network concepts for later analysis:
+save(fun_BRCA, file = "20190626_fundamental network concepts foR BRCA.RData")
+
+#Merge the gene significance data frame with TCGA PubMed ID data:
+
+# Import PubMed ID data and reformat it into a data frame:
+PubMed = as.data.frame(PubMed.ID.for.all.TCGA.genes)
+colnames(PubMed) = c("genename", "entrez", "PubMed")
+
+# We want the scaled connectivity k = connectivity/max(connectivity), which is an indication of hub gene significance.
+genesig_BRCA = as.data.frame(fun_BRCA$ScaledConnectivity)
+row.names(genesig_BRCA) = colnames(WGCNA_matrix_BRCA)
+
+#Merge the gene significance data frame with TCGA PubMed ID data:
+
+# For the genesig_BRCA data frame, we first need to separate the row name into two columns (official gene symbol
+# and Entrez ID):
+library(dplyr)
+genesig_BRCA = tibble::rownames_to_column(genesig_BRCA, "gene") #To make the rowname column into a new column.
+
+#Separate the "gene" column:
+library(tidyr)
+genesig_BRCA = separate(genesig_BRCA, 1, into = c("genename", "entrez"), sep = "([|])", remove = FALSE)
+
+#Reformat the genesig_BRCA data frame:
+row.names(genesig_BRCA) = genesig_BRCA$gene
+genesig_BRCA = genesig_BRCA[,-1]
+
+#Now we can merge genesig_BRCA and PubMed:
+sig_PubMed_BRCA = merge(PubMed, genesig_BRCA, by = "entrez")
+sig_PubMed_BRCA = sig_PubMed_BRCA[, -4]
+
+#Save the data:
+write.table(sig_PubMed_BRCA, file = "20190624_hub gene significance and PubMed ID for BRCA.txt")
+
+#Perform correlation between scaled connectivity and PubMed number:
+corAndPvalue(sig_PubMed_BRCA$PubMed, sig_PubMed_BRCA$`fun_BRCA$ScaledConnectivity`, method = "pearson")
+corAndPvalue(sig_PubMed_BRCA$PubMed, sig_PubMed_BRCA$`fun_BRCA$ScaledConnectivity`, method = "kendall")
+
+#Get a sense of the distribution of the scaled connectivity in the BRCA network:
+par(mar = c(5, 5, 2, 2))
+hist(genesig_BRCA$`fun_BRCA$ScaledConnectivity`, breaks = ,
+     main = paste("Histogram of gene scaled connectivity for BRCA network"),
+     xlab = "Scaled connectivity", axes = TRUE, mar = c(10, 4, 4, 2) + 0.1)
+
+
+#Export the network into edge and node list files Cytoscape can read
+cyt_BRCA = exportNetworkToCytoscape(tom_BRCA,
+                                    edgeFile = "Cytoscape edge file for BRCA threshold 0.06",
+                                    nodeFile = "Cytoscape node file for BRCA threshold 0.06",
+                                    weighted = TRUE,
+                                    threshold = 0.06,
+                                    nodeNames = colnames(WGCNA_matrix_BRCA),
+                                    nodeAttr = moduleColors_BRCA)
+
+#Export the network into edge and node list files Cytoscape can read
+cyt_BRCA = exportNetworkToCytoscape(tom_BRCA,
+                                    edgeFile = "Cytoscape edge file for PRAD threshold 0.05",
+                                    nodeFile = "Cytoscape node file for PRAD threshold 0.05",
+                                    weighted = TRUE,
+                                    threshold = 0.05,
+                                    nodeNames = colnames(WGCNA_matrix_BRCA),
+                                    nodeAttr = moduleColors_BRCA)
+
+
+#Export the network into edge and node list files Cytoscape can read
+cyt_BRCA = exportNetworkToCytoscape(tom_BRCA,
+                                    edgeFile = "Cytoscape edge file for PRAD threshold 0.08",
+                                    nodeFile = "Cytoscape node file for PRAD threshold 0.08",
+                                    weighted = TRUE,
+                                    threshold = 0.08,
+                                    nodeNames = colnames(WGCNA_matrix_BRCA),
+                                    nodeAttr = moduleColors_BRCA)

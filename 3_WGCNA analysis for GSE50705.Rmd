@@ -1,0 +1,357 @@
+---
+title: "GSE50705"
+author: "Vy Tran"
+date: "August 1, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Set the working directory
+```{r}
+filepath = "D:/vytran/OneDrive - JHSPH/Year 3/Evaluate-the-validity-of-the-breast-cancer-cell-line-MCF7-as-a-model-for-breast-cancer-research"
+setwd(filepath)
+getwd()
+```
+Get packages (skip if already installed the package). Install Biomanager if needed:
+```{r}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install(version = "3.11")
+```
+Load packages
+```{r}
+library(Biobase)
+library(GEOquery)
+library(WGCNA)
+```
+Get GSE dataset: 
+```{r}
+#Important line. Do not skip:
+options(stringsAsFactors=FALSE)
+gse = getGEO("GSE50705",  GSEMatrix = TRUE)  #Must set GSEMatrix to TRUE (the default option) to get expression set
+
+#Extracting expression data from GSE:
+gse = gse[[1]]
+genematrix = exprs(gse)
+
+#Subset matrix for BPA and estrogen:
+BPA = genematrix[, 1:84]  #Check GSE website for treatment info
+es = genematrix[, 174:261]
+```
+Use biomaRt to convert Affymatrix gene IDs to Official Gene Symbols. 
+```{r}
+    #Load the package and view the user manual:
+library(biomaRt)
+listMarts()
+    
+    #Choose which database and dataset to use:
+     ensembl = useMart("ensembl",dataset="hsapiens_gene_ensembl")
+     
+    #Based on the website for the GSE50705 dataset, the platform is Affymetrix Human Genome U133 Plus 2.0 Array. Once this is known,
+    #you can use the listAttributes() function to find the right name for the Affymetrix Human Genome U133 Plus 2.0 Array in biomaRt.
+searchAttributes(mart = ensembl, pattern = "symbol")
+    #Extract Affymetrix IDs from the multi-set data:
+    probes = as.character(row.names(es))
+    length(probes)
+    
+    #Now Affymetrix probe IDs can be converted to official gene symbols with the function getBM():
+    officialID = getBM(filters = "affy_hg_u133_plus_2", 
+                       attributes = c("affy_hg_u133_plus_2","hgnc_symbol"),
+                       values = probes, mart = ensembl)
+    #we filtered out the probes that do not map to a gene, i.e. that do not have a gene symbol assigned.
+     show(officialID)[1:50]
+    officialID <- subset(officialID, !is.na(hgnc_symbol))
+
+    show(officialID)[1:50]
+
+```
+Remove multiple mapping:
+```{r}
+library(dplyr)
+length(officialID$hgnc_symbol)
+length(probes)
+
+#We compute a summary table in the code to group by probeID. 
+anno_grouped <- group_by(officialID, affy_hg_u133_plus_2)
+
+#We then summarized the groups and indicate the number of different genes assigned to a transcript cluster in the column no_of_matches.
+anno_summarized <-  dplyr::summarize(anno_grouped, no_of_matches = n_distinct(hgnc_symbol))
+
+head(anno_summarized)
+
+#Finally, we filtered for PROBEIDs with multiple matches, i.e. no_of_matches > 1.
+anno_filtered <- filter(anno_summarized, no_of_matches > 1)
+head(anno_filtered)
+probe_stats <- anno_filtered 
+
+anno_kept = filter(anno_summarized, no_of_matches == 1)
+nrow(anno_kept)
+head(anno_kept)
+nrow(probe_stats)
+
+gene_probe = left_join(anno_kept, officialID)
+dim(gene_probe)
+gene_probe = gene_probe[,-2]
+es1 = as.data.frame(es)
+dim(es1)
+
+colnames(gene_probe) = c("PROBEID", "hgnc_symbol")
+es1$PROBEID = row.names(es1)
+
+
+es_final <- left_join(gene_probe, es1)
+dim(es_final)
+head(es_final)
+
+es_final$name <- paste(es_final$PROBEID, es_final$hgnc_symbol, sep = "|")
+es_final = as.data.frame(es_final)
+rownames(es_final) = es_final$name
+es_final = es_final[, -c(1,2)]
+es_final = es_final[, !(colnames(es_final) %in% c("name"))]
+dim(es_final)
+es_final = data.matrix(es_final)
+
+```
+
+
+```{r}
+
+# Transpose the data and filter for 10000 most variant expression using median absolute deviation:
+#transpose matrix to correlate genes in the following:
+MCF7_estrogen = t(es_final[order(apply(es_final,1,mad), decreasing = T)[1:10000],])
+dim(MCF7_estrogen)
+```
+
+```{r}
+#Choosing a soft-thresholding power. Constructing a weighted gene network entails the choice of the soft thresholding power to which co-expression similarity is raised to calculate adjacency. The choice of the soft thresholding power is based on the criterion of approximate scale-free topology:
+
+# Choose a set of soft-thresholding powers
+powers = c(c(1:10), seq(from = 12, to=20, by=2))
+# Call the network topology analysis function
+sft = pickSoftThreshold(MCF7_estrogen, powerVector = powers, verbose = 5)
+
+# Plot the results:
+sizeGrWindow(9, 5)
+par(mfrow = c(1,2));
+cex1 = 0.9;
+pdf(file = "Soft-thresholding power for GEO.pdf", width = 12, height = 9)
+
+# Scale-free topology fit index as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     xlab="Soft Threshold (power)",ylab="Scale Free Topology Model Fit,signed R^2",type="n",
+     main = paste("Scale independence"));
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     labels=powers,cex=cex1,col="red");
+# this line corresponds to using an R^2 cut-off of h
+abline(h=0.90,col="red")
+# Mean connectivity as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], sft$fitIndices[,5],
+     xlab="Soft Threshold (power)",ylab="Mean Connectivity", type="n",
+     main = paste("Mean connectivity"))
+text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers, cex=cex1,col="red")
+
+dev.off()
+#Based on the scale-free topology graph, the soft-thresholding power of 6 was chosen.
+#################################################################################################
+```
+
+```{r}
+# Constructing the gene network and identifying modules for GEO:
+net_GEO = blockwiseModules(MCF7_estrogen, power = 7,
+                            TOMType = "unsigned", minModuleSize = 80,
+                            reassignThreshold = 0, mergeCutHeight = 0.25,
+                            numericLabels = TRUE, pamRespectsDendro = FALSE,
+                            saveTOMs = TRUE,
+                            saveTOMFileBase = "GEOTOM",
+                            verbose = 3)
+
+# To see how many modules were identified and what the module sizes are, one can use table(net$colors).
+table(net_GEO$colors)
+
+#Now we can visualize the modules.
+
+# Convert labels to colors for plotting
+mergedColors_GEO = labels2colors(net_GEO$colors)
+
+# Plot the dendrogram and the module colors underneath
+par(mfrow = c(1,1))
+pdf(file = "Cluster dendrogram for GEO_August 2020.pdf", width = 12, height = 9)
+
+plotDendroAndColors(net_GEO$dendrograms[[1]], mergedColors_GEO[net_GEO$blockGenes[[1]]],
+                    "Module colors",
+                    dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05, main = "Cluster dendrogram for GEO")
+dev.off()
+```
+
+```{r}
+
+# We now save the module assignment and module eigengene information necessary for subsequent analysis:
+moduleLabels_GEO = net_GEO$colors
+moduleColors_GEO = labels2colors(net_GEO$colors)
+MEs_GEO = net_GEO$MEs;
+geneTree_GEO = net_GEO$dendrograms[[1]];
+#save(MEs_GEO, moduleLabels_GEO, moduleColors_GEO, geneTree_GEO,
+    # file = "Data Outputs/GEOnetwork_modulecolor_and_label.RData")
+```
+
+```{r}
+#################################################################################################
+
+#We now create a data frame holding the following information for all genes: gene names, 
+#module color,and module membership and p-values in all modules:
+
+# Extract eigengenes:
+# Define numbers of genes and samples
+nGenes = ncol(MCF7_estrogen)
+nSamples = nrow(MCF7_estrogen)
+
+# Recalculate MEs with color labels
+MEs0_GEO = moduleEigengenes(MCF7_estrogen, moduleColors_GEO)$eigengenes
+MEs_GEO = orderMEs(MEs0_GEO)
+
+# Calculate module membership to identify important genes. Module membership is defined as the correlation of the module eigengene 
+# with gene expression profile of the gene.
+
+# names (colors) of the modules
+modNames_GEO = substring(names(MEs_GEO), 3)
+
+geneModuleMembership_GEO = as.data.frame(cor(MCF7_estrogen, MEs_GEO, use = "p"));
+MMPvalue_GEO = as.data.frame(corPvalueStudent(as.matrix(geneModuleMembership_GEO), nSamples));
+
+names(geneModuleMembership_GEO) = paste("MM", modNames_GEO, sep="");
+names(MMPvalue_GEO) = paste("p.MM", modNames_GEO, sep="");
+
+# Create the starting data frame
+geneInfoGEO = data.frame(Genename = colnames(MCF7_estrogen),
+                          moduleColor = moduleColors_GEO,
+                          geneModuleMembership_GEO,
+                          MMPvalue_GEO)
+
+#Order the genes in the geneInfo variable by module color:
+geneOrder_GEO = order(geneInfoGEO$moduleColor)
+geneInfoGEO_1 = geneInfoGEO[geneOrder_GEO, ]
+
+#Save the data frame:
+save(geneInfoGEO_1, file = "GEO_geneMM_August_20th_2020.Rdata")
+write.csv(geneInfoGEO_1, file  = "GEO_geneMM_August_20th_2020.csv")
+unique(geneInfoGEO_1$moduleColor)
+table(geneInfoGEO_1$moduleColor)
+
+#################################################################################################
+```
+
+
+```{r}
+#Now we calculate scaled connectivity of genes in the GEO network:
+
+#Create a TOM matrix:
+tom_GEO = TOMsimilarityFromExpr(MCF7_estrogen)
+fun = fundamentalNetworkConcepts(tom_GEO, GS = NULL) #May take > 30 minutes to compute
+
+#We want the scaled connectivity k = connectivity/max(connectivity), which is an indication of hub gene significance.
+connectivity_GEO = as.data.frame(fun$ScaledConnectivity)
+row.names(connectivity_GEO) = colnames(MCF7_estrogen)
+
+#Save the data:
+write.csv(connectivity_GEO, file = "Scaled connectivity for GEO50705.csv")
+```
+Next, I extract genes with connectivity > 0.70 and inputed these gebes into canSAR gene/protein annotation tool to find  ligand druggability score. The results are plotted in the figure below:
+```{r}
+GEO_druggability = GEO_top_connectivity.gene_CANSAR.score
+score = GEO_druggability[,c(3,23)]
+```
+
+```{r}
+png(file="GEO top connected gene druggability.png",width=400,height=800)
+par(mar=c(5, 7,  2, 2))
+barplot(names.arg = score$gene_name, score$ligand_druggability_score, horiz =TRUE, xlab = c("Ligand druggability score"), col = "steelblue4", border = c("white"), las =1, cex.names = 1, space = c(1.5), xlim = c(-3,3))
+dev.off()
+```
+I also obtained druggability scores for all 10,000 genes in GSE and selected top 20 genes with highest scores. The top 20 genes with highest ligand druggability scores of BRCA and GEO are plotted side by side:
+
+```{r}
+
+GEO_top_druggability = GEO_ligand_druggability_combined_10000_genes[, c(2,22)]
+GEO_top_druggability = GEO_top_druggability[!duplicated(GEO_top_druggability$gene_name), ]
+attach(GEO_top_druggability)
+GEO_top_20_ligand_druggability_genes = GEO_top_druggability[order(-ligand_druggability_score),]
+detach(GEO_top_druggability)
+
+GEO_top_20_ligand_druggability_genes = GEO_top_20_ligand_druggability_genes[1:20,]
+
+GEO_top_20_ligand_druggability_genes = GEO_top_20_ligand_druggability_genes[order(GEO_top_20_ligand_druggability_genes$ligand_druggability_score), ]
+
+attach(BRCA_top_20_ligand_druggability_genes)
+BRCA_top_20_ligand_druggability_genes = BRCA_top_20_ligand_druggability_genes[order(ligand_druggability_score),]
+detach(BRCA_top_20_ligand_druggability_genes)
+
+
+jpeg(file= "GEO and BRCA genes with highest ligand druggability scores among 10000 genes.jpeg", width = 3000, height = 3000, res = 300) 
+
+par(mfrow=c(1,2), mar=c(5.1, 7, 4.1, 2.1))
+
+barplot(names.arg = GEO_top_20_ligand_druggability_genes$gene_name, GEO_top_20_ligand_druggability_genes$ligand_druggability_score, horiz =TRUE, xlab = c("Ligand druggability score"), col = "darkslategray", border = c("white"), las =1, cex.names = 1, space = c(1.5), xlim = c(0,3.5))
+title(main ="a", adj=0, line=2, font=2, cex.main = 2)
+
+barplot(names.arg = BRCA_top_20_ligand_druggability_genes$gene_name, BRCA_top_20_ligand_druggability_genes$ligand_druggability_score, horiz =TRUE, xlab = c("Ligand druggability score"), col = "darkslategray", border = c("white"), las =1, cex.names = 1, space = c(1.5), xlim = c(0,3.5))
+title(main ="b", adj=0, line=2, font=2, cex.main = 2)
+
+dev.off()
+
+```
+How much of the top 20 genes are overlapped?
+```{r}
+ligand_intersect = intersect(GEO_top_20_ligand_druggability_genes$gene_name, BRCA_top_20_ligand_druggability_genes$gene_name)
+
+ligand_intersect
+
+length(ligand_intersect)
+```
+
+Next, we compute the network:
+```{r}
+#Compute the network:
+tom_MCF7_estrogen = TOMsimilarityFromExpr(MCF7_estrogen)
+
+```
+
+Extract green module that 
+```{r}
+# Select modules
+modules = c("green")
+
+# Select module probes
+Genes = colnames(MCF7_estrogen)
+inModule = is.finite(match(moduleColors_GEO, modules))
+modGenes =Genes[inModule]
+
+# Select the corresponding Topological Overlap
+modTOM = tom_MCF7_estrogen[inModule, inModule]
+dimnames(modTOM) = list(modGenes, modGenes)
+
+# Export the network into edge and node list files Cytoscape can read
+cyt = exportNetworkToCytoscape(modTOM,
+                               edgeFile = paste("GSE_edges_0_06 threshold", paste(modules, collapse="_"), ".txt", sep=""),
+                               nodeFile = paste("GSE_nodes_0_06 threshold", paste(modules, collapse="_"), ".txt", sep=""),
+                               weighted = TRUE,
+                               threshold = 0.06,
+                               nodeNames = modGenes,
+                               nodeAttr = moduleColors_GEO[inModule])
+```
+
+Get the unduplicated gene list in the module turquoise:
+```{r}
+turquoise = geneInfoGEO_1 %>% filter(moduleColor == "turquoise",na.rm = TRUE)
+#Separate probe names and column names. Remove duplicates in the turquoise gene list:
+
+turquoise_genes = unique(Module_turquoise_of_GSE50705_with_separated_gene_symbols$Symbol)
+length(turquoise_genes)
+write.csv(turquoise_genes, file = "Unique genes in module turquoise of GSE50705.csv")
+```
+
+
+```{r}
+

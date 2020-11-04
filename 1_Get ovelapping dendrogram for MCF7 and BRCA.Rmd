@@ -1,0 +1,217 @@
+---
+title: "Venn diagram to show overlap between MCF7 ARCHS4, BRCA, and MCF7 GSE"
+author: "Vy Tran"
+date: "July 6, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+filepath = "D:/vytran/OneDrive - JHSPH/Year 3/Evaluate-the-validity-of-the-breast-cancer-cell-line-MCF7-as-a-model-for-breast-cancer-research/"
+setwd(filepath)
+getwd()
+options(stringsAsFactors=FALSE) 
+```
+
+```{r library}
+library(WGCNA)
+library(GEOquery)
+library(stringr)
+library(tidyverse)
+library(VennDiagram)
+```
+batch_corrected_RNA_MCF7_voom: MCF7 data was download from ARCHS4, normalized using voom. Now we fitler for the top 10,000 genes to reduce noise. 
+```{r}
+
+load(file = "D:/vytran/OneDrive - JHSPH/Year 3/Evaluate-the-validity-of-the-breast-cancer-cell-line-MCF7-as-a-model-for-breast-cancer-research/batch_corrected_RNA_MCF7_ARCHS4.Rdata")
+
+MCF7_ARCHS4 = t(batch_corrected_RNA_MCF7_voom[order(apply(batch_corrected_RNA_MCF7_voom,1,mad), decreasing = T)[1:10000],])
+dim(MCF7_ARCHS4)
+```
+WGCNA_matrix_BRCA:  BRCA data was downloaded from TCGA as level 3 normalized data. The top 10,000 genes were filtered. 
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+dim(WGCNA_matrix_BRCA)
+```
+Next we obtain the top 10000 genes in MCF7 GEO. The resulting data set is called MCF7_estrogen.
+
+View the gene names of the three data sets:
+```{r}
+colnames(MCF7_ARCHS4)[1:10]
+colnames(WGCNA_matrix_BRCA)[1:10]
+colnames(MCF7_estrogen)[1:10]
+```
+
+Extract gene names for each data set: 
+```{r}
+gene_ARCHS4 = colnames(MCF7_ARCHS4)
+gene_ARCHS4_1 = str_extract(gene_ARCHS4, "[^-]+")
+```
+View the result:
+```{r}
+gene_ARCHS4[1:10]
+gene_ARCHS4_1[1:10]
+```
+
+Similarly, extract gene names for BRCA:
+```{r}
+gene_BRCA = str_extract(colnames(WGCNA_matrix_BRCA), "[^|]+")
+head(gene_BRCA, 10)
+
+```
+Extract gene names for GEO:
+```{r}
+#\\b is a zero-length token that matches a word-boundary. This includes any non-word characters:
+gene_GEO = str_extract(colnames(MCF7_estrogen), '\\b\\w+$')
+head(gene_GEO, 10)
+
+```
+
+(NOTE: This chunk was not run.) For the GEO MCF7 data set, we convert Affymetrix probe to gene symbols using the limma package.
+```{r}
+#Load the limma package:
+     library(limma)
+     
+    #Installing annotation packages. The appropriate packages for the specific Affymetrix platform can be found on Bioconductor: 
+     #BiocManager::install(c("hgu133plus2cdf", "hgu133plus2.db"))
+     library(hgu133plus2cdf)
+     library(hgu133plus2.db)
+     
+    #Get gene symbols. Multiple entries will be collapsed and separated by semicolons, e.g. if geneID 001 corresponds to gene names 
+    #"Name1" and "Name2", these will be collapsed into "Name1; Name2":
+     probes = colnames(MCF7_estrogen)
+     gene_GEO <- as.character(unlist(lapply(mget(probes,env=hgu133plus2SYMBOL),
+     function (symbol) { return(paste(symbol,collapse="; ")) } )))
+    head(gene_GEO,15)
+    #Cross reference with the bioMart method to make sure that the conversion is correct.
+```
+
+
+Remove "NA" and duplicated values:
+```{r}
+#Removing NA values: 
+gene_ARCHS4 = gene_ARCHS4_1[!is.na(gene_ARCHS4)]
+gene_BRCA = gene_BRCA[!is.na(gene_BRCA)]
+gene_GEO = gene_GEO[!is.na(gene_GEO)]
+
+#Removing duplicated values:
+gene_ARCHS4 = unique(gene_ARCHS4)
+gene_BRCA = unique(gene_BRCA)
+gene_GEO = unique(gene_GEO)
+length(gene_ARCHS4)
+length(gene_BRCA)
+length(gene_GEO)
+
+```
+
+Now compare the number of overlap genes between these three data sets:
+```{r}
+length(intersect(gene_ARCHS4, gene_BRCA))
+length(intersect(gene_ARCHS4, gene_GEO))
+length((intersect(gene_BRCA, gene_GEO)))
+```
+
+```{r}
+#Make Venn diagram to show overlap between 3 data sets:
+venn.diagram(x = list(gene_ARCHS4, gene_BRCA, gene_GEO),
+             category.names = c("ARCHS4", "BRCA", "GSE50705"),
+             filename = "overlap of genes in 3 data sets.png",
+             output =TRUE,
+            imagetype = "png",
+            scale = FALSE,
+            col = "black",
+            #fill = colors,
+            fill = c("dodgerblue", "orchid3", "darkorange1"), 
+            cat.cex = 1.2,
+            margin = 0.15)
+
+
+```
+Next, we extract genes that are overlapped and non-overlapped between the 3 data sets to do annotations. 
+```{r}
+#Genes shared between all 3 data sets:
+shared_3_sets = Reduce(intersect, list(gene_ARCHS4, gene_BRCA, gene_GEO))
+
+###
+
+#Genes shared between ARCHS4 and BRCA:
+shared_ARCHS4_BRCA = intersect(gene_ARCHS4, gene_BRCA)
+
+#Genes in ARCHS4 but not in BRCA (the elements of setdiff(x,y) are those elements in x but not in y):
+differ_ARCHS4_BRCA_ARCHS4 = setdiff(x = gene_ARCHS4, y = gene_BRCA)
+
+#Genes in BRCA but not in ARCHS4:
+differ_ARCHS4_BRCA_BRCA = setdiff(x =  gene_BRCA, y = gene_ARCHS4)
+
+###
+#Genes shared between BRCA and GEO:
+shared_BRCA_GEO = intersect(gene_BRCA, gene_GEO)
+#Genes shared between ARCHS4 and GSE: 
+shared_ARCHS4_GEO = intersect(gene_ARCHS4, gene_GEO)
+
+#Genes in ARCHS4 but not in GEO:
+differ_ARCHS4_GEO_ARCHS4 = setdiff(x = gene_ARCHS4, y = gene_GEO)
+
+#Genes in GEO but not in ARCHS4:
+differ_ARCHS4_GEO_GEO = setdiff(x =  gene_GEO, y = gene_ARCHS4)
+
+###
+
+#Gene in BRCA but not in GEO:
+differ_BRCA_GEO_BRCA = setdiff(x = gene_BRCA, y = gene_GEO)
+
+#Gene in GEO but not in BRCA:
+differ_BRCA_GEO_GEO = setdiff(x = gene_GEO, y = gene_BRCA)
+
+#Genes unique to GEO: 
+unique_GEO = setdiff(gene_GEO, union(gene_ARCHS4, gene_BRCA))
+unique_GEO[1:50]
+
+#Genes unique to BRCA: 
+unique_BRCA = setdiff(gene_BRCA, union(gene_ARCHS4, gene_GEO))
+
+#Genes unique to ARCHS4:
+unique_ARCHS4 = setdiff(gene_ARCHS4, union(gene_BRCA, gene_GEO))
+
+#Genes overlap between ARCHS4 and GSE but not BRCA:
+shared_ARCHS4_GSE_notBRCA = setdiff(x = shared_ARCHS4_GEO, y = shared_3_sets)
+
+#Genes overlap between ARCHS4 and BRCA but not GSE:
+shared_ARCHS4_BRCA_notGSE = setdiff(x = shared_ARCHS4_BRCA, y = shared_3_sets)
+
+#Genes shared between BRCA and GSE but not ARCHS4:
+shared_BRCA_GSE_notARCHS4 = setdiff(x = shared_BRCA_GEO, y = shared_3_sets)
+```
+Next, we export these items and do functional annotations of these lists. 
+```{r}
+write.csv(shared_3_sets, file = "List of genes shared between ARCHS4, GEO, and BRCA.csv")
+write.csv(shared_ARCHS4_BRCA , file = "List of genes shared between ARCHS4 and BRCA.csv")
+write.csv(differ_ARCHS4_BRCA_ARCHS4, file = "List of genes in ARCHS4 but not in BRCA.csv")
+write.csv(shared_ARCHS4_GEO, file = "List of genes shared ARCHS4 and GEO.csv")
+write.csv(unique_GEO, file = "List of genes unique to GEO.csv")
+write.csv(unique_BRCA, file = "List of genes unique to BRCA.csv")
+write.csv(unique_ARCHS4, file = "List of genes unique to ARCHS4.csv")
+write.csv(shared_ARCHS4_GSE_notBRCA, file = "Genes shared between ARCHS4 and GSE but not BRCA.csv")
+write.csv(shared_ARCHS4_BRCA_notGSE, file = "Genes shared between ARCHS4 and BRCA but not GSE.csv")
+write.csv(shared_BRCA_GSE_notARCHS4, file = "Genes shared between BRCA and GSE but not ARCHS4.csv")
+
+
+
+```
+
+Now we install DAVID to perform annotation 
+```{r}
+BiocManager::install("RDAVIDWebService")
+library(RDAVIDWebService)
+```
+
+```{r}
+david <- DAVIDWebService$new(email= "vtran21@jhmi.edu", url="https://david.ncifcrf.gov/webservice/services/DAVIDWebService.DAVIDWebServiceHttpSoap12Endpoint/")
+
+data(demoList1)
+ result<-addList(david, demoList1, idType="AFFYMETRIX_3PRIME_IVT_ID", listName="demoList1", listType="Gene")
+```
+
+```{r}
+
+
+
+
